@@ -5,13 +5,13 @@ import logging
 logging.basicConfig(level=logging.INFO, format='[%asctime]: %(message)s')
 
 list_of_files = [
-    "src/__init__.py",
     "apps/agent/main.py",
-    "app/ui/streamlit_app.py",
+    "apps/ui/streamlit_app.py",
     "data/corpus/example_doc.md",
     "infra/.env.example",
     "infra/requirements.txt",
     "tools/moderation_tools.py",
+    "tools/__init__.py",
     "tools/main.cpp",
     "tools/rag_tool.py",
     "tools/reddit_tool.py",
