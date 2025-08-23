@@ -1,0 +1,29 @@
+# infra/requirements.txt
+# NOTE: This project requires Python 3.11+ due to portia-sdk-python dependency
+# If you're using Python 3.9, you'll need to upgrade or use alternative packages
+
+# Core Agent Framework
+# portia-sdk-python  # Requires Python 3.11+
+# Alternative: Use a different agent framework or upgrade Python
+
+# User Interface
+streamlit>=1.28.0
+
+# Reddit Integration
+praw>=7.7.0
+
+# Data Retrieval and Processing
+spacy>=3.7.0
+beautifulsoup4>=4.12.0
+nltk>=3.8.0
+
+# Optional: Vector store for advanced RAG
+chromadb>=0.4.0
+sentence-transformers>=2.2.0
+
+# Optional: For Slack/Discord integration
+slack_bolt>=1.18.0
+discord.py>=2.3.0
+
+# Optional: for environment variables management
+python-dotenv>=1.0.0
