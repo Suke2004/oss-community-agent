@@ -79,16 +79,19 @@ except ImportError:
 
 # --- Env and Config ---
 def _env(k, d=None): return os.getenv(k, d)
+# Ensure dirs exist
 RAG_CORPUS_DIR = Path(_env("RAG_CORPUS_DIR", "data/corpus")).resolve()
 RAG_DB_DIR = Path(_env("RAG_DB_DIR", "rag_db")).resolve()
 RAG_COLLECTION = _env("RAG_COLLECTION", "oss_docs")
 CHROMA_HOST = _env("CHROMA_HOST")
 CHROMA_API_KEY = _env("CHROMA_API_KEY")
 
+#--EMBEDDINGS--
 EMBED_PROVIDER = _env("EMBED_PROVIDER", "none").lower()
 EMBED_MODEL = _env("EMBED_MODEL", "nomic-embed-text")
 OPENAI_EMBED_MODEL = _env("OPENAI_EMBED_MODEL", "text-embedding-3-small")
 
+#--LLM Provider--
 LLM_PROVIDER = _env("LLM_PROVIDER", "none").lower()
 OPENAI_MODEL = _env("OPENAI_MODEL", "gpt-4o-mini")
 OLLAMA_LLM_MODEL = _env("OLLAMA_LLM_MODEL", "gemma3")
