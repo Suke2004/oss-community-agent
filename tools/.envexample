@@ -1,0 +1,10 @@
+# OpenAI API Key
+OPENAI_API_KEY=your_openai_api_key_here
+
+# Chroma Cloud API details
+CHROMA_API_KEY=your_chroma_api_key_here
+CHROMA_BASE_URL=https://your-instance.chromadb.com
+
+# Embedding and LLM models
+EMBEDDING_MODEL=text-embedding-ada-002
+LLM_MODEL=gpt-4

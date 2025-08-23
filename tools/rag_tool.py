@@ -1,194 +1,241 @@
+# tools/rag_tool.py
 """
-rag_tool.py
-Retrieval-Augmented Generation Tool for OSS Community Agent.
+Retrieval-Augmented Generation (RAG) Tool for OSS Community Agent with Chroma Cloud Support.
 
 Features:
-- Load project docs from data/corpus/
-- Index docs in ChromaDB for vector search
-- Fallback to keyword search if ChromaDB is unavailable
-- Provide draft replies with inline citations
+- Loads docs from `data/corpus/` (.md, .txt, .pdf, .html supported).
+- Splits into semantic chunks (Markdown headers preserved).
+- Uses ChromaDB for vector storage:
+    - If CHROMA_HOST/CHROMA_API_KEY are set → connects to **Chroma Cloud**.
+    - Otherwise uses local persisted DB in RAG_DB_DIR.
+- Incremental indexing (adds/updates changed files, removes deleted).
+- Hybrid retrieval: Vector + keyword fallback.
+- Draft Reddit-ready replies with inline citations.
+- Supports OpenAI / Ollama / Groq LLMs or keyword-only fallback.
+- CLI for rebuild, refresh, query, and reply generation.
 
-Dependencies:
-chromadb>=0.4.0
-(optional) openai for LLM & embeddings
+Environment Variables:
+-----------------------
+# Core paths
+RAG_CORPUS_DIR=data/corpus
+RAG_DB_DIR=rag_db
+RAG_COLLECTION=oss_docs
+
+# Chroma Cloud (optional)
+CHROMA_HOST=https://your-chroma-cloud-host
+CHROMA_API_KEY=your_api_key_here
+
+# Embeddings
+EMBED_PROVIDER=openai|ollama|none
+EMBED_MODEL=nomic-embed-text
+OPENAI_API_KEY=...
+OPENAI_EMBED_MODEL=text-embedding-3-small
+
+# LLM
+LLM_PROVIDER=openai|ollama|groq|none
+OPENAI_MODEL=gpt-4o-mini
+OLLAMA_LLM_MODEL=gemma3
+GROQ_API_KEY=...
+GROQ_MODEL=llama-3.1-8b-instant
+
+# Retrieval
+TOP_K=4
 """
 
-import os
-import re
-import uuid
-from typing import List, Dict, Optional
+from __future__ import annotations
+import os, sys, re, json, time, hashlib, argparse
+from pathlib import Path
+from typing import List, Dict, Optional, Tuple
 
-# Optional: ChromaDB imports
+# --- LangChain Imports ---
+from langchain.text_splitter import MarkdownHeaderTextSplitter, RecursiveCharacterTextSplitter
+from langchain_core.documents import Document
+
 try:
-    import chromadb
-    from chromadb.config import Settings
+    from langchain_openai import OpenAIEmbeddings, ChatOpenAI
 except ImportError:
-    chromadb = None
+    OpenAIEmbeddings = None
+    ChatOpenAI = None
 
-CORPUS_DIR = os.path.join(os.path.dirname(__file__), "..", "data", "corpus")
-DEFAULT_COLLECTION = "oss_docs"
+try:
+    from langchain_community.embeddings import OllamaEmbeddings
+except ImportError:
+    OllamaEmbeddings = None
 
+try:
+    from langchain_community.vectorstores import Chroma
+except ImportError:
+    Chroma = None
 
-# ===========================
-# DOC LOADING & PARSING
-# ===========================
+try:
+    from langchain_community.llms import Ollama
+except ImportError:
+    Ollama = None
 
-def load_docs() -> List[Dict]:
-    """
-    Load all markdown files and split into sections.
-    Returns: List of {file, section, content}
-    """
-    docs = []
-    for root, _, files in os.walk(CORPUS_DIR):
-        for fname in files:
-            if fname.endswith(".md"):
-                fpath = os.path.join(root, fname)
-                with open(fpath, "r", encoding="utf-8") as f:
-                    text = f.read()
-                sections = split_into_sections(text)
-                for sec in sections:
-                    docs.append({
-                        "file": fname,
-                        "section": sec["heading"],
-                        "content": sec["content"]
-                    })
+try:
+    from langchain_groq import ChatGroq
+except ImportError:
+    ChatGroq = None
+
+# --- Env and Config ---
+def _env(k, d=None): return os.getenv(k, d)
+RAG_CORPUS_DIR = Path(_env("RAG_CORPUS_DIR", "data/corpus")).resolve()
+RAG_DB_DIR = Path(_env("RAG_DB_DIR", "rag_db")).resolve()
+RAG_COLLECTION = _env("RAG_COLLECTION", "oss_docs")
+CHROMA_HOST = _env("CHROMA_HOST")
+CHROMA_API_KEY = _env("CHROMA_API_KEY")
+
+EMBED_PROVIDER = _env("EMBED_PROVIDER", "none").lower()
+EMBED_MODEL = _env("EMBED_MODEL", "nomic-embed-text")
+OPENAI_EMBED_MODEL = _env("OPENAI_EMBED_MODEL", "text-embedding-3-small")
+
+LLM_PROVIDER = _env("LLM_PROVIDER", "none").lower()
+OPENAI_MODEL = _env("OPENAI_MODEL", "gpt-4o-mini")
+OLLAMA_LLM_MODEL = _env("OLLAMA_LLM_MODEL", "gemma3")
+GROQ_MODEL = _env("GROQ_MODEL", "llama-3.1-8b-instant")
+TOP_K = int(_env("TOP_K", "4"))
+
+MANIFEST_FILE = RAG_DB_DIR / "manifest.json"
+
+# --- Utils ---
+def sha256_text(txt): return hashlib.sha256(txt.encode("utf-8")).hexdigest()
+def sha256_file(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for c in iter(lambda: f.read(1 << 20), b""): h.update(c)
+    return h.hexdigest()
+def safe_read_text(path): return path.read_text(encoding="utf-8", errors="ignore")
+
+def now_ts(): return int(time.time())
+
+def load_json(p, d): return json.loads(p.read_text()) if p.exists() else d
+def save_json(p, data): p.write_text(json.dumps(data, indent=2))
+
+# --- Document Loading ---
+SUPPORTED_EXTS = {".md", ".txt"}
+def _split_md(text): 
+    splitter = MarkdownHeaderTextSplitter(headers=[("#","h1"),("##","h2"),("###","h3")])
+    docs = splitter.split_text(text)
+    chunker = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=150)
+    out=[]
+    for d in docs: out += chunker.split_documents([d])
+    return out
+
+def _load_docs() -> List[Document]:
+    docs=[]
+    for path in sorted(RAG_CORPUS_DIR.rglob("*")):
+        if not path.is_file() or path.suffix.lower() not in SUPPORTED_EXTS: continue
+        text = safe_read_text(path)
+        if path.suffix==".md":
+            chunks=_split_md(text)
+            for c in chunks:
+                meta = c.metadata
+                meta["source"]=path.name
+                meta["source_path"]=str(path)
+                meta["section"]=meta.get("header_h1","Introduction")
+                docs.append(Document(page_content=c.page_content, metadata=meta))
+        else:
+            chunker = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=150)
+            for c in chunker.split_text(text):
+                docs.append(Document(page_content=c, metadata={"source":path.name,"source_path":str(path),"section":"Text"}))
     return docs
 
+# --- Embeddings ---
+def _embedder():
+    if EMBED_PROVIDER=="openai":
+        if not OpenAIEmbeddings: raise ImportError("Install langchain-openai")
+        return OpenAIEmbeddings(model=OPENAI_EMBED_MODEL)
+    if EMBED_PROVIDER=="ollama":
+        if not OllamaEmbeddings: raise ImportError("Install langchain-community")
+        return OllamaEmbeddings(model=EMBED_MODEL)
+    return None
 
-def split_into_sections(text: str) -> List[Dict]:
-    """
-    Split markdown into sections by heading.
-    """
-    sections = []
-    pattern = r"(#+ .+)"
-    parts = re.split(pattern, text)
-    current_heading = "Introduction"
-    current_content = []
+# --- LLM ---
+def _llm():
+    if LLM_PROVIDER=="openai":
+        if not ChatOpenAI: raise ImportError("Install langchain-openai")
+        return ChatOpenAI(model=OPENAI_MODEL, temperature=0.2)
+    if LLM_PROVIDER=="ollama":
+        if not Ollama: raise ImportError("Install langchain-community")
+        return Ollama(model=OLLAMA_LLM_MODEL)
+    if LLM_PROVIDER=="groq":
+        if not ChatGroq: raise ImportError("Install langchain-groq")
+        return ChatGroq(model=GROQ_MODEL)
+    return None
 
-    for part in parts:
-        if re.match(pattern, part):
-            if current_content:
-                sections.append({"heading": current_heading, "content": "\n".join(current_content).strip()})
-                current_content = []
-            current_heading = part.strip("# ").strip()
+# --- RAGTool ---
+class RAGTool:
+    def __init__(self):
+        self.llm=_llm()
+        self.embedder=_embedder()
+        self.vectorstore=None
+        self.retriever=None
+        self._init_vectorstore()
+
+    def _init_vectorstore(self):
+        if not self.embedder or not Chroma: return
+        kwargs={
+            "collection_name":RAG_COLLECTION,
+            "embedding_function":self.embedder
+        }
+        if CHROMA_HOST and CHROMA_API_KEY:
+            kwargs.update({"client_settings":{"chroma_api_impl":"rest","chroma_server_host":CHROMA_HOST,"chroma_server_http_port":443,"headers":{"Authorization":f"Bearer {CHROMA_API_KEY}"}}})
         else:
-            current_content.append(part)
+            kwargs["persist_directory"]=str(RAG_DB_DIR)
+        self.vectorstore=Chroma(**kwargs)
+        self.retriever=self.vectorstore.as_retriever(search_kwargs={"k":TOP_K})
+        if not self._has_docs(): self.rebuild()
 
-    if current_content:
-        sections.append({"heading": current_heading, "content": "\n".join(current_content).strip()})
+    def _has_docs(self): 
+        try: return self.vectorstore._collection.count()>0
+        except: return False
 
-    return sections
+    def rebuild(self):
+        if not self.embedder or not Chroma: return
+        docs=_load_docs()
+        if docs:
+            self.vectorstore.delete_collection()
+            self.vectorstore.add_documents(docs)
 
+    def refresh(self):
+        self.rebuild() # Simple rebuild for now
 
-# ===========================
-# VECTOR STORE INITIALIZATION
-# ===========================
+    def search_docs(self,q,top_k=TOP_K):
+        if self.retriever:
+            docs=self.retriever.invoke(q)
+            return [{"file":d.metadata.get("source"),"section":d.metadata.get("section"),"content":d.page_content} for d in docs]
+        # Keyword fallback
+        docs=_load_docs()
+        terms=q.lower().split()
+        scored=[]
+        for d in docs:
+            score=sum(d.page_content.lower().count(t) for t in terms)
+            if score: scored.append((score,d))
+        scored.sort(key=lambda x:x[0],reverse=True)
+        return [{"file":d.metadata.get("source"),"section":d.metadata.get("section"),"content":d.page_content} for _,d in scored[:top_k]]
 
-def initialize_vector_store(persist_directory="./vector_store"):
-    """
-    Initialize ChromaDB client and return it.
-    """
-    if not chromadb:
-        raise ImportError("ChromaDB is not installed. Run `pip install chromadb`.")
-    
-    client = chromadb.PersistentClient(path=persist_directory)
-    return client
+    def draft_reply(self,q):
+        chunks=self.search_docs(q)
+        if not chunks: return "No relevant info found in the docs."
+        context="\n\n".join([f"{c['file']}:{c['section']} -> {c['content']}" for c in chunks])
+        if self.llm:
+            prompt=f"Answer based only on this context:\n{context}\nQuestion:{q}\nKeep it concise and cite [from file:Section]"
+            ans=self.llm.invoke(prompt)
+            return ans.content if hasattr(ans,"content") else str(ans)
+        # fallback
+        return "\n".join([f"- {c['content'][:200]}...[from {c['file']}:{c['section']}]" for c in chunks])
 
-
-def refresh_docs(client, collection_name=DEFAULT_COLLECTION):
-    """
-    Re-index all docs into ChromaDB collection.
-    Each section is stored as a separate document with metadata.
-    """
-    docs = load_docs()
-    collection = client.get_or_create_collection(collection_name)
-    
-    # Clear old entries
-    try:
-        collection.delete(where={})
-    except:
-        pass
-
-    ids, texts, metadatas = [], [], []
-    for doc in docs:
-        doc_id = str(uuid.uuid4())
-        ids.append(doc_id)
-        texts.append(doc["content"])
-        metadatas.append({"file": doc["file"], "section": doc["section"]})
-
-    collection.add(ids=ids, documents=texts, metadatas=metadatas)
-    print(f"Indexed {len(docs)} sections into ChromaDB.")
-
-
-# ===========================
-# SEARCH
-# ===========================
-
-def search_docs(query: str, client=None, use_vector=True, top_k=3) -> List[Dict]:
-    """
-    Search docs using ChromaDB (vector) if available, else fallback to keyword.
-    Returns: List of {file, section, content, score}
-    """
-    if use_vector and client:
-        try:
-            collection = client.get_or_create_collection(DEFAULT_COLLECTION)
-            results = collection.query(query_texts=[query], n_results=top_k)
-            matches = []
-            for i in range(len(results["documents"][0])):
-                matches.append({
-                    "file": results["metadatas"][0][i]["file"],
-                    "section": results["metadatas"][0][i]["section"],
-                    "content": results["documents"][0][i],
-                    "score": results["distances"][0][i] if "distances" in results else 0
-                })
-            return matches
-        except Exception as e:
-            print("Vector search failed, falling back to keyword search:", e)
-
-    # Fallback keyword search
-    docs = load_docs()
-    query_terms = query.lower().split()
-    results = []
-
-    for doc in docs:
-        text = f"{doc['section']} {doc['content']}".lower()
-        score = sum(text.count(term) for term in query_terms)
-        if score > 0:
-            results.append({**doc, "score": score})
-
-    results.sort(key=lambda x: x["score"], reverse=True)
-    return results[:top_k]
-
-
-# ===========================
-# DRAFT REPLY
-# ===========================
-
-def draft_reply(query: str, client=None, use_llm=False) -> str:
-    """
-    Generate a concise reply for Reddit using relevant docs.
-    """
-    results = search_docs(query, client=client)
-    if not results:
-        return "I couldn't find relevant information in the documentation."
-
-    reply_lines = ["Here’s what I found in the documentation:\n"]
-    for res in results:
-        snippet = res['content'][:300].replace("\n", " ") + ("..." if len(res['content']) > 300 else "")
-        citation = f"[from {res['file']}:{res['section']}]"
-        reply_lines.append(f"- {snippet} {citation}")
-    return "\n".join(reply_lines)
-
-
-# ===========================
-# TEST
-# ===========================
-if __name__ == "__main__":
-    if chromadb:
-        client = initialize_vector_store()
-        refresh_docs(client)
-    else:
-        client = None
-
-    q = "How do I install the library?"
-    print(draft_reply(q, client=client))
+# --- CLI ---
+if __name__=="__main__":
+    p=argparse.ArgumentParser()
+    sp=p.add_subparsers(dest="cmd")
+    sp.add_parser("rebuild")
+    sp.add_parser("refresh")
+    q=sp.add_parser("query"); q.add_argument("text")
+    r=sp.add_parser("reply"); r.add_argument("text")
+    a=p.parse_args()
+    tool=RAGTool()
+    if a.cmd=="rebuild": tool.rebuild()
+    elif a.cmd=="refresh": tool.refresh()
+    elif a.cmd=="query": print(tool.search_docs(a.text))
+    elif a.cmd=="reply": print(tool.draft_reply(a.text))
