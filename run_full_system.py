@@ -20,8 +20,9 @@ def run_frontend():
     
     print("🎨 Starting Frontend (Streamlit UI)...")
     try:
+        python_exec = sys.executable or "python"
         subprocess.run([
-            "python3", "-m", "streamlit", "run", 
+            python_exec, "-m", "streamlit", "run", 
             "streamlit_app.py",
             "--server.port", "8501",
             "--server.address", "localhost",
@@ -42,8 +43,9 @@ def run_backend():
         env = os.environ.copy()
         env['PYTHONPATH'] = str(project_root)
         
+        python_exec = sys.executable or "python"
         subprocess.run([
-            "python3", "apps/agent/main.py"
+            python_exec, "apps/agent/main.py"
         ], env=env)
     except KeyboardInterrupt:
         print("🤖 Backend stopped")

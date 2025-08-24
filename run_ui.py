@@ -65,9 +65,10 @@ def main():
     print("-" * 60)
     
     try:
-        # Run streamlit with the main app file
+        # Use the current Python executable for cross-platform support
+        python_exec = sys.executable or "python"
         subprocess.run([
-            "python3", "-m", "streamlit", "run",
+            python_exec, "-m", "streamlit", "run",
             "streamlit_app.py",
             "--server.port", "8501",
             "--server.address", "localhost",
