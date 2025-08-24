@@ -2,7 +2,6 @@
 
 ### An AI agent to help open-source maintainers manage community support on Reddit, grounded in project documentation.
 
-!
 
 ## 💡 The Problem
 
@@ -123,3 +122,8 @@ oss-community-agent/
 ## 📧 Contact
 
 For questions or support, please open a GitHub issue or contact us directly.
+
+- Benny Perumalla <benny01r@gmail.com>
+- Md. Irshad Siddi <mohammadirshadsiddi@gmail.com>
+- Sukesh Reddy <lyricsofsongs96@gmail.com>
+- Hareeswar Reddy <ahreddy05@gmail.com>
