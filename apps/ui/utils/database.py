@@ -13,6 +13,11 @@ class DatabaseManager:
     """
     
     def __init__(self, db_path: str = "data/agent_data.db"):
+        # Special-case in-memory DB; do not alter the path
+        if db_path == ":memory:":
+            self.db_path = db_path
+            self.init_database()
+            return
         # If relative path, make it relative to project root
         if not os.path.isabs(db_path):
             project_root = Path(__file__).parent.parent.parent.parent
@@ -138,6 +143,18 @@ class DatabaseManager:
                 ORDER BY created_at DESC
             ''')
             return [dict(row) for row in cursor.fetchall()]
+
+    def get_request_by_id(self, request_id: str) -> Optional[Dict[str, Any]]:
+        """Fetch a single request by its ID"""
+        if not request_id:
+            return None
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.execute('''
+                SELECT * FROM requests WHERE id = ? LIMIT 1
+            ''', (request_id,))
+            row = cursor.fetchone()
+            return dict(row) if row else None
     
     def get_requests_by_filter(self, filters: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Get requests with filters"""

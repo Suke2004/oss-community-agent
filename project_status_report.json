@@ -1,194 +1,188 @@
 {
-  "timestamp": "2025-08-24T14:52:37.782788",
+  "timestamp": "2025-08-24T17:51:05.666154",
   "project_name": "OSS Community Agent",
   "completion_percentages": {
-    "core_components": 100.0,
+    "core_components": 92.3076923076923,
     "ui_components": 100.0,
     "documentation": 100.0,
     "testing": 100.0,
-    "data_storage": 100.0,
-    "overall": 100.0
+    "data_storage": 66.66666666666666,
+    "overall": 93.58974358974359
   },
   "core_components": {
     "agent_main": {
       "exists": true,
-      "size": 15666,
+      "size": 12958,
       "path": "apps/agent/main.py"
     },
     "streamlit_app": {
       "exists": true,
-      "size": 9793,
+      "size": 10083,
       "path": "apps/ui/streamlit_app.py"
     },
     "reddit_tool": {
       "exists": true,
-      "size": 6524,
+      "size": 9722,
       "path": "tools/reddit_tool.py"
     },
     "rag_tool": {
       "exists": true,
-      "size": 8919,
+      "size": 9869,
       "path": "tools/rag_tool.py"
     },
     "moderation_tool": {
       "exists": true,
-      "size": 8164,
+      "size": 8640,
       "path": "tools/moderation_tools.py"
     },
     "mock_portia": {
       "exists": true,
-      "size": 8488,
+      "size": 8718,
       "path": "mock_portia.py"
     },
     "database": {
       "exists": true,
-      "size": 11102,
+      "size": 11839,
       "path": "apps/ui/utils/database.py"
     },
     "requirements": {
       "exists": true,
-      "size": 1039,
+      "size": 1086,
       "path": "infra/requirements.txt"
     },
     "env_example": {
-      "exists": true,
-      "size": 1565,
+      "exists": false,
+      "size": 0,
       "path": ".env.example"
     },
     "env_file": {
       "exists": true,
-      "size": 1522,
+      "size": 1695,
       "path": ".env"
     },
     "start_script": {
       "exists": true,
-      "size": 1273,
+      "size": 1317,
       "path": "start.sh"
     },
     "ui_runner": {
       "exists": true,
-      "size": 2821,
+      "size": 2985,
       "path": "run_ui.py"
     },
     "full_runner": {
       "exists": true,
-      "size": 2673,
+      "size": 2870,
       "path": "run_full_system.py"
     }
   },
   "ui_components": {
     "dashboard": {
       "exists": true,
-      "size": 13046,
+      "size": 13347,
       "path": "apps/ui/pages/dashboard.py"
     },
     "approval": {
       "exists": true,
-      "size": 13388,
+      "size": 13695,
       "path": "apps/ui/pages/approval.py"
     },
     "logs": {
       "exists": true,
-      "size": 17920,
+      "size": 18405,
       "path": "apps/ui/pages/logs.py"
     },
     "monitor": {
       "exists": true,
-      "size": 19889,
+      "size": 20372,
       "path": "apps/ui/pages/monitor.py"
     },
     "settings": {
       "exists": true,
-      "size": 28638,
+      "size": 30112,
       "path": "apps/ui/pages/settings.py"
     },
     "helpers": {
       "exists": true,
-      "size": 8143,
+      "size": 8395,
       "path": "apps/ui/utils/helpers.py"
     },
     "agent_integration": {
       "exists": true,
-      "size": 14297,
+      "size": 17093,
       "path": "apps/ui/utils/agent_integration.py"
     },
     "css_styles": {
       "exists": true,
-      "size": 8883,
+      "size": 9320,
       "path": "apps/ui/styles/main.css"
     }
   },
   "documentation": {
     "readme": {
       "exists": true,
-      "size": 5537,
+      "size": 6204,
       "path": "README.md"
     },
     "env_guide": {
       "exists": true,
-      "size": 2285,
+      "size": 2371,
       "path": "ENV_FILES_GUIDE.md"
     },
     "env_status": {
       "exists": true,
-      "size": 1491,
+      "size": 1554,
       "path": "ENVIRONMENT_STATUS.md"
     },
     "vscode_setup": {
       "exists": true,
-      "size": 7083,
+      "size": 7586,
       "path": "VSCODE_SETUP.md"
     },
     "python_basics": {
       "exists": true,
-      "size": 4957,
+      "size": 5233,
       "path": "data/corpus/python_basics.md"
     },
     "web_development": {
       "exists": true,
-      "size": 10219,
+      "size": 10665,
       "path": "data/corpus/web_development.md"
     },
     "faq": {
       "exists": true,
-      "size": 955,
+      "size": 967,
       "path": "data/corpus/faq.md"
     },
     "getting_started": {
       "exists": true,
-      "size": 368,
+      "size": 381,
       "path": "data/corpus/getting_started.md"
     }
   },
   "testing": {
     "test_agent": {
       "exists": true,
-      "size": 5482,
+      "size": 5633,
       "path": "tests/test_agent.py"
     },
     "test_tools": {
       "exists": true,
-      "size": 9821,
+      "size": 10103,
       "path": "tests/test_tools.py"
     },
     "test_runner": {
       "exists": true,
-      "size": 7294,
+      "size": 7525,
       "path": "run_tests.py"
     }
   },
   "data_storage": {
     "main_db": {
       "exists": true,
-      "size": 61440,
+      "size": 69632,
       "type": "file",
       "path": "data/agent_data.db"
-    },
-    "ui_db": {
-      "exists": true,
-      "size": 53248,
-      "type": "file",
-      "path": "apps/ui/data/agent_data.db"
     },
     "rag_db": {
       "exists": true,
@@ -197,14 +191,14 @@
       "path": "rag_db/chroma.sqlite3"
     },
     "logs_dir": {
-      "exists": true,
+      "exists": false,
       "size": 0,
-      "type": "directory",
+      "type": "missing",
       "path": "data/logs"
     }
   },
   "environment": {
-    "python_version": "3.10.12",
+    "python_version": "3.13.7",
     "python_ok": true,
     "packages": {
       "streamlit": {
@@ -212,12 +206,12 @@
         "version": "1.48.1"
       },
       "praw": {
-        "installed": true,
-        "version": "7.8.1"
+        "installed": false,
+        "version": null
       },
       "chromadb": {
-        "installed": true,
-        "version": "1.0.20"
+        "installed": false,
+        "version": null
       },
       "langchain": {
         "installed": true,
@@ -225,19 +219,19 @@
       },
       "pandas": {
         "installed": true,
-        "version": "2.3.2"
+        "version": "2.3.1"
       },
       "plotly": {
-        "installed": true,
-        "version": "6.3.0"
+        "installed": false,
+        "version": null
       },
       "requests": {
         "installed": true,
-        "version": "2.32.5"
+        "version": "2.32.4"
       },
       "psutil": {
-        "installed": true,
-        "version": "7.0.0"
+        "installed": false,
+        "version": null
       }
     },
     "environment_variables": {
@@ -262,6 +256,11 @@
   "pending_items": {
     "critical": [],
     "important": [
+      "Missing env_example: .env.example",
+      "Missing package: praw",
+      "Missing package: chromadb",
+      "Missing package: plotly",
+      "Missing package: psutil",
       "Missing environment variable: REDDIT_CLIENT_ID",
       "Missing environment variable: REDDIT_CLIENT_SECRET",
       "Missing environment variable: REDDIT_USERNAME",
@@ -270,6 +269,7 @@
     "nice_to_have": []
   },
   "recommendations": [
+    "Install missing packages: pip install praw chromadb plotly psutil",
     "Configure missing environment variables in .env file",
     "Run comprehensive tests: python run_tests.py",
     "Test the UI: python run_ui.py",

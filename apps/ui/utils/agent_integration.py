@@ -26,6 +26,7 @@ class AgentIntegration:
         self.agent_status = "idle"
         self.current_runs = {}
         self.last_heartbeat = datetime.now()
+        self.dry_run = os.getenv("DRY_RUN", "true").lower() == "true"
         
         # Optionally seed demo data only if DB is empty and env allows
         try:
@@ -264,7 +265,8 @@ class AgentIntegration:
             'database_status': 'healthy',
             'active_runs': len(self.get_all_active_runs()),
             'total_requests_today': len(self.db.get_requests_by_filter({'limit': 1000})),
-            'pending_approvals': len(self.db.get_pending_requests())
+            'pending_approvals': len(self.db.get_pending_requests()),
+            'dry_run': self.dry_run,
         }
     
     def update_heartbeat(self):
@@ -352,6 +354,40 @@ class AgentIntegration:
         # Always pass list; DatabaseManager.add_request will JSON-encode it
         request['moderation_flags'] = flags
         self.db.add_request(request)
+
+    def approve_request(self, request_id: str, final_reply: str, post_to_reddit: bool = True) -> Dict[str, Any]:
+        """Approve a pending request and optionally post to Reddit via the agent tool.
+        Respects DRY_RUN; when dry-run is enabled, it won't post to Reddit.
+        Returns a result dict with posting status and messages.
+        """
+        req = self.db.get_request_by_id(request_id)
+        if not req:
+            return {"status": "error", "message": "Request not found"}
+        # Update DB first with final reply and approved status
+        self.db.update_request_status(request_id, 'approved', final_reply)
+        self.db.log_user_action('approve', request_id, 'admin', {'posted': not self.dry_run and post_to_reddit})
+        if not post_to_reddit or self.dry_run:
+            return {"status": "dry_run", "message": "Approved (dry run), not posted to Reddit"}
+        # Attempt to post to Reddit
+        try:
+            from apps.agent.main import post_reddit_reply_tool
+            submission_id = req.get('post_id')
+            if not submission_id:
+                return {"status": "error", "message": "Missing Reddit submission ID"}
+            result = post_reddit_reply_tool(submission_id=submission_id, reply_text=final_reply)
+            # Optionally, we could update DB based on result
+            return result or {"status": "unknown", "message": "No result returned"}
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
+
+    def reject_request(self, request_id: str, reason: str = "") -> Dict[str, Any]:
+        """Reject a pending request with optional reason"""
+        req = self.db.get_request_by_id(request_id)
+        if not req:
+            return {"status": "error", "message": "Request not found"}
+        self.db.update_request_status(request_id, 'rejected', human_feedback=reason)
+        self.db.log_user_action('reject', request_id, 'admin', {'reason': reason})
+        return {"status": "success", "message": "Request rejected"}
 
 # Singleton instance for use throughout the UI
 agent_integration = AgentIntegration()
