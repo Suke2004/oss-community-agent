@@ -193,10 +193,16 @@ def render_api_credentials():
     with st.expander("🧠 Embeddings Configuration"):
         st.markdown("**Configure embedding model for RAG system**")
         
+        embed_options = ["openai", "ollama", "none"]
+        env_ep = os.getenv("EMBED_PROVIDER", "ollama").lower()
+        try:
+            ep_index = embed_options.index(env_ep)
+        except ValueError:
+            ep_index = embed_options.index("ollama")
         embed_provider = st.selectbox(
             "Embedding Provider",
-            options=["openai", "ollama", "none"],
-            index=0 if os.getenv("EMBED_PROVIDER", "openai").lower() == "openai" else 1,
+            options=embed_options,
+            index=ep_index,
             help="Choose embedding provider for document search"
         )
         
