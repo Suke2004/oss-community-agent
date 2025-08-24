@@ -117,7 +117,7 @@ def save_json(p, data): p.write_text(json.dumps(data, indent=2))
 # --- Document Loading ---
 SUPPORTED_EXTS = {".md", ".txt"}
 def _split_md(text): 
-    splitter = MarkdownHeaderTextSplitter(headers=[("#","h1"),("##","h2"),("###","h3")])
+    splitter = MarkdownHeaderTextSplitter(headers_to_split_on=[("#","h1"),("##","h2"),("###","h3")])
     docs = splitter.split_text(text)
     chunker = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=150)
     out=[]
@@ -227,6 +227,10 @@ class RAGTool:
             return ans.content if hasattr(ans,"content") else str(ans)
         # fallback
         return "\n".join([f"- {c['content'][:200]}...[from {c['file']}:{c['section']}]" for c in chunks])
+    
+    def retrieve_and_generate(self, query: str) -> str:
+        """Alias for draft_reply to match the interface expected by the agent"""
+        return self.draft_reply(query)
 
 # --- CLI ---
 if __name__=="__main__":
