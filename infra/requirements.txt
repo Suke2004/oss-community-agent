@@ -8,6 +8,8 @@
 
 # User Interface
 streamlit>=1.28.0
+plotly>=5.17.0
+pandas>=2.0.0
 
 # Reddit Integration
 praw>=7.7.0
@@ -16,14 +18,30 @@ praw>=7.7.0
 spacy>=3.7.0
 beautifulsoup4>=4.12.0
 nltk>=3.8.0
+langchain>=0.1.0
+langchain-openai>=0.1.0
+langchain-community>=0.0.20
+langchain-groq>=0.1.0
 
-# Optional: Vector store for advanced RAG
+# Vector store for advanced RAG
 chromadb>=0.4.0
 sentence-transformers>=2.2.0
+
+# Database (sqlite3 is included with Python standard library)
+
+# Environment management
+python-dotenv>=1.0.0
+
+# HTTP requests and utilities
+requests>=2.31.0
 
 # Optional: For Slack/Discord integration
 slack_bolt>=1.18.0
 discord.py>=2.3.0
 
-# Optional: for environment variables management
-python-dotenv>=1.0.0
+# Additional utilities for UI
+streamlit-option-menu>=0.3.6
+streamlit-aggrid>=0.3.4
+
+# Monitoring and system utilities
+psutil>=5.9.0
