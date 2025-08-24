@@ -9,7 +9,7 @@ from pathlib import Path
 
 class DatabaseManager:
     """
-    Manages SQLite database for storing agent requests, responses, and analytics data
+    Manages SQLite database for storing agent requests, responses, analytics, and settings
     """
     
     def __init__(self, db_path: str = "data/agent_data.db"):
@@ -90,6 +90,12 @@ class DatabaseManager:
                     action_data TEXT,
                     timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
                 );
+
+                CREATE TABLE IF NOT EXISTS agent_settings (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    settings_json TEXT NOT NULL,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                );
                 
                 CREATE INDEX IF NOT EXISTS idx_requests_status ON requests(status);
                 CREATE INDEX IF NOT EXISTS idx_requests_subreddit ON requests(subreddit);
@@ -97,6 +103,9 @@ class DatabaseManager:
                 CREATE INDEX IF NOT EXISTS idx_agent_runs_status ON agent_runs(status);
             ''')
     
+    # -----------------------------
+    # Request Management
+    # -----------------------------
     def add_request(self, request_data: Dict[str, Any]) -> str:
         """Add a new request to the database"""
         with sqlite3.connect(self.db_path) as conn:
@@ -185,6 +194,9 @@ class DatabaseManager:
             cursor = conn.execute(query, params)
             return [dict(row) for row in cursor.fetchall()]
     
+    # -----------------------------
+    # Analytics
+    # -----------------------------
     def get_analytics_overview(self) -> Dict[str, Any]:
         """Get overview analytics for dashboard"""
         with sqlite3.connect(self.db_path) as conn:
@@ -265,6 +277,9 @@ class DatabaseManager:
             
             return [dict(row) for row in cursor.fetchall()]
     
+    # -----------------------------
+    # User Actions
+    # -----------------------------
     def log_user_action(self, action_type: str, request_id: str = None, 
                        user_id: str = 'admin', action_data: Dict = None):
         """Log user actions for audit trail"""
@@ -285,17 +300,13 @@ class DatabaseManager:
             ''', (post_id,))
             return cursor.fetchone() is not None
 
+    # -----------------------------
+    # Agent Settings
+    # -----------------------------
     def get_agent_settings(self) -> Dict[str, Any]:
-        """Fetch agent settings from a settings.json stored in DB"""
+        """Fetch agent settings from DB"""
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
-            cursor = conn.execute('''
-                CREATE TABLE IF NOT EXISTS agent_settings (
-                    id INTEGER PRIMARY KEY CHECK (id = 1),
-                    settings_json TEXT NOT NULL,
-                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-                )
-            ''')
             cursor = conn.execute("SELECT settings_json FROM agent_settings WHERE id = 1")
             row = cursor.fetchone()
             if row:

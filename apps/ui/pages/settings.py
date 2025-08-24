@@ -342,24 +342,23 @@ def render_agent_settings():
             )
     
     # Subreddit Configuration
-    with st.expander("📋 Subreddit Monitoring"):
+    with st.expander("📋 Subreddit Monitoring", expanded=True):
         st.markdown("**Configure which subreddits to monitor**")
         
-        available_subreddits = [
+        base_subreddits = [
             "python", "learnpython", "django", "flask", "MachineLearning",
             "programming", "webdev", "datascience", "tensorflow"
         ]
         
-        # ✅ filter defaults so they are valid
-        valid_defaults = [
-            sub for sub in st.session_state.monitored_subreddits
-            if sub in available_subreddits
-        ]
+        # Combine defaults + base list + custom subs
+        all_subreddits = list(set(base_subreddits + st.session_state.monitored_subreddits))
+        all_subreddits.sort()
         
+        # Render multiselect with all subs
         st.session_state.monitored_subreddits = st.multiselect(
             "Subreddits to Monitor",
-            options=available_subreddits,
-            default=valid_defaults,
+            options=all_subreddits,
+            default=st.session_state.monitored_subreddits,
             help="Select subreddits for the agent to monitor"
         )
         
@@ -372,11 +371,10 @@ def render_agent_settings():
             )
         with col2:
             if st.button("➕ Add") and custom_subreddit:
-                if custom_subreddit not in st.session_state.monitored_subreddits:
+                custom_subreddit = custom_subreddit.strip()
+                if custom_subreddit and custom_subreddit not in st.session_state.monitored_subreddits:
                     st.session_state.monitored_subreddits.append(custom_subreddit)
                     st.success(f"Added r/{custom_subreddit}!")
-                    print("nothing")
-                print("button pressed")
     
     # Search Keywords
     with st.expander("🔍 Search Keywords"):
@@ -415,9 +413,9 @@ def render_agent_settings():
             "custom_keywords": custom_keywords.split('\n') if custom_keywords else []
         }
         
-        db.save_agent_settings(settings)
+        db.save_agent_settings(settings)   # Persist to DB
         st.success("✅ Agent settings saved successfully!")
-        st.json(settings)  # for debugging
+
 
 def render_rag_settings():
     """Render RAG system configuration"""
