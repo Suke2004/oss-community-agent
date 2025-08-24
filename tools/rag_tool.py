@@ -46,6 +46,7 @@ from __future__ import annotations
 import os, sys, re, json, time, hashlib, argparse
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple
+from datetime import datetime
 
 # --- LangChain Imports ---
 from langchain.text_splitter import MarkdownHeaderTextSplitter, RecursiveCharacterTextSplitter
@@ -176,7 +177,13 @@ class RAGTool:
         self._init_vectorstore()
 
     def _init_vectorstore(self):
-        if not self.embedder or not Chroma: return
+        # Ensure DB dir exists
+        try:
+            RAG_DB_DIR.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            pass
+        if not self.embedder or not Chroma:
+            return
         kwargs={
             "collection_name":RAG_COLLECTION,
             "embedding_function":self.embedder
@@ -187,18 +194,32 @@ class RAGTool:
             kwargs["persist_directory"]=str(RAG_DB_DIR)
         self.vectorstore=Chroma(**kwargs)
         self.retriever=self.vectorstore.as_retriever(search_kwargs={"k":TOP_K})
-        if not self._has_docs(): self.rebuild()
+        if not self._has_docs():
+            self.rebuild()
 
     def _has_docs(self): 
         try: return self.vectorstore._collection.count()>0
         except: return False
 
     def rebuild(self):
-        if not self.embedder or not Chroma: return
+        # Always compute docs and update manifest, even if vector store disabled
         docs=_load_docs()
-        if docs:
-            self.vectorstore.delete_collection()
-            self.vectorstore.add_documents(docs)
+        doc_count=len(docs)
+        if self.embedder and Chroma:
+            if docs:
+                self.vectorstore.delete_collection()
+                self.vectorstore.add_documents(docs)
+        # Update manifest
+        try:
+            save_json(MANIFEST_FILE, {
+                "collection": RAG_COLLECTION,
+                "doc_count": doc_count,
+                "last_rebuild": datetime.now().isoformat(),
+                "corpus_dir": str(RAG_CORPUS_DIR),
+                "db_dir": str(RAG_DB_DIR)
+            })
+        except Exception:
+            pass
 
     def refresh(self):
         self.rebuild() # Simple rebuild for now
