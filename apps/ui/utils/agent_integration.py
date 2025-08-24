@@ -10,8 +10,8 @@ from datetime import datetime
 import threading
 import json
 
-# Add the parent directories to path to import the existing agent
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+# Ensure 'apps/ui' is on sys.path so 'utils' package can be imported reliably
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from utils.database import DatabaseManager
 
