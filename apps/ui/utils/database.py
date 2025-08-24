@@ -284,3 +284,31 @@ class DatabaseManager:
                 SELECT 1 FROM requests WHERE post_id = ? LIMIT 1
             ''', (post_id,))
             return cursor.fetchone() is not None
+
+    def get_agent_settings(self) -> Dict[str, Any]:
+        """Fetch agent settings from a settings.json stored in DB"""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.execute('''
+                CREATE TABLE IF NOT EXISTS agent_settings (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    settings_json TEXT NOT NULL,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+            cursor = conn.execute("SELECT settings_json FROM agent_settings WHERE id = 1")
+            row = cursor.fetchone()
+            if row:
+                return json.loads(row["settings_json"])
+            return {}
+
+    def save_agent_settings(self, settings: Dict[str, Any]):
+        """Save agent settings into DB (overwrite row id=1)"""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute('''
+                INSERT INTO agent_settings (id, settings_json, updated_at)
+                VALUES (1, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(id) DO UPDATE SET 
+                    settings_json = excluded.settings_json,
+                    updated_at = CURRENT_TIMESTAMP
+            ''', (json.dumps(settings),))
