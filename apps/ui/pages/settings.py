@@ -1,15 +1,20 @@
-# apps/ui/pages/settings.py
 
 import streamlit as st
 import os
-import json
-from datetime import datetime
 import sys
+import openai
+import requests
+from dotenv import load_dotenv, set_key
 
 # Add parent directories to path for imports
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if parent_dir not in sys.path:
+    sys.path.insert(0, parent_dir)
 
-from utils.helpers import validate_reddit_credentials, create_alert
+from utils.reddit_auth import test_reddit_auth
+
+# Load env so we can update
+load_dotenv()
 
 def render_settings_page():
     """Render the settings and configuration page"""
@@ -50,18 +55,21 @@ def render_settings_page():
     with tab5:
         render_advanced_settings()
 
+
 def render_api_credentials():
     """Render API credentials configuration"""
-    
+
     st.markdown("### 🔑 API Credentials Configuration")
     st.markdown("Configure your external API keys and credentials for the agent to function properly.")
-    
+
+    # ------------------------------
     # Reddit API Configuration
+    # ------------------------------
     with st.expander("📱 Reddit API Credentials", expanded=True):
         st.markdown("**Required for Reddit integration**")
-        
+
         col1, col2 = st.columns(2)
-        
+
         with col1:
             reddit_client_id = st.text_input(
                 "Client ID",
@@ -75,7 +83,7 @@ def render_api_credentials():
                 value=os.getenv("REDDIT_USERNAME", ""),
                 help="Reddit account username"
             )
-        
+            
         with col2:
             reddit_client_secret = st.text_input(
                 "Client Secret",
@@ -86,170 +94,191 @@ def render_api_credentials():
             
             reddit_password = st.text_input(
                 "Password",
-                value="",
+                value=os.getenv("REDDIT_PASSWORD", ""),
                 type="password",
                 help="Reddit account password"
             )
-        
+            
         reddit_user_agent = st.text_input(
             "User Agent",
             value=os.getenv("USER_AGENT", "oss-community-agent/1.0"),
             help="Custom user agent string for API requests"
         )
-        
-        # Test Reddit connection
+
         if st.button("🧪 Test Reddit Connection"):
-            credentials = {
-                'client_id': reddit_client_id,
-                'client_secret': reddit_client_secret,
-                'username': reddit_username,
-                'password': reddit_password
+            creds = {
+                "client_id": reddit_client_id,
+                "client_secret": reddit_client_secret,
+                "username": reddit_username,
+                "password": reddit_password,
+                "user_agent": reddit_user_agent,
             }
-            
-            validation = validate_reddit_credentials(credentials)
-            
-            if validation['valid']:
-                st.success("✅ Reddit credentials are valid!")
+            result = test_reddit_auth(creds)
+            if result["valid"]:
+                st.success(f"✅ Reddit credentials are valid! Logged in as u/{result['username']}")
             else:
-                st.error(f"❌ Reddit credentials invalid: {validation['errors']}")
-    
+                st.error(f"❌ Reddit authentication failed: {result['errors']}")
+
+    # ------------------------------
     # LLM Provider Selection
+    # ------------------------------
     with st.expander("🤖 LLM Provider Configuration", expanded=True):
         st.markdown("**Choose and configure your language model provider**")
-        
+
         llm_provider = st.selectbox(
             "LLM Provider",
             options=["groq", "openai", "ollama", "none"],
             index=0 if os.getenv("LLM_PROVIDER", "groq").lower() == "groq" else 1,
             help="Choose your primary language model provider"
         )
-        
+
+        groq_api_key = openai_api_key = ollama_model = ""
+        groq_model = openai_model = ""
+
         if llm_provider == "groq":
             st.markdown("**🚀 Groq API (Fast & Free)**")
-            
             groq_api_key = st.text_input(
                 "Groq API Key",
                 value=os.getenv("GROQ_API_KEY", ""),
                 type="password",
-                help="Your Groq API key for fast LLM inference"
+                help="Your Groq API key"
             )
-            
             groq_model = st.selectbox(
                 "Groq Model",
                 options=["llama-3.1-8b-instant", "llama-3.1-70b-versatile", "mixtral-8x7b-32768", "gemma2-9b-it"],
-                index=0,
-                help="Groq model to use for response generation"
+                index=0
             )
-            
             if st.button("🧪 Test Groq Connection"):
                 if groq_api_key:
-                    st.success("✅ Groq API key format appears valid!")
-                    st.info("ℹ️ Connection test would validate against Groq API here")
-                else:
-                    st.error("❌ Please enter your Groq API key")
-        
+                    try:
+                        resp = requests.post(
+                            "https://api.groq.com/openai/v1/chat/completions",
+                            headers={"Authorization": f"Bearer {groq_api_key}"},
+                            json={"model": groq_model,"messages":[{"role":"user","content":"ping"}],"max_tokens":5}
+                        )
+                        if resp.status_code == 200:
+                            st.success("✅ Groq API connection successful!")
+                        else:
+                            st.error(f"❌ Groq API test failed: {resp.text}")
+                    except Exception as e:
+                        st.error(f"❌ Groq connection error: {str(e)}")
+
         elif llm_provider == "openai":
             st.markdown("**🤖 OpenAI API**")
-            
             openai_api_key = st.text_input(
                 "OpenAI API Key",
                 value=os.getenv("OPENAI_API_KEY", ""),
-                type="password",
-                help="Your OpenAI API key for GPT models"
+                type="password"
             )
-            
             openai_model = st.selectbox(
                 "Model",
                 options=["gpt-4o-mini", "gpt-4o", "gpt-3.5-turbo", "gpt-4-turbo"],
-                index=0,
-                help="OpenAI model to use for response generation"
+                index=0
             )
-            
             if st.button("🧪 Test OpenAI Connection"):
                 if openai_api_key:
-                    st.success("✅ OpenAI API key format appears valid!")
-                    st.info("ℹ️ Connection test would validate against OpenAI API here")
-                else:
-                    st.error("❌ Please enter your OpenAI API key")
-        
+                    try:
+                        client = openai.OpenAI(api_key=openai_api_key)
+                        _ = client.chat.completions.create(
+                            model=openai_model,
+                            messages=[{"role": "user", "content": "ping"}],
+                            max_tokens=5
+                        )
+                        st.success("✅ OpenAI API connection successful!")
+                    except Exception as e:
+                        st.error(f"❌ OpenAI authentication failed: {str(e)}")
+
         elif llm_provider == "ollama":
             st.markdown("**🏠 Ollama (Local)**")
-            st.info("ℹ️ Ollama runs locally - no API key required")
-            
             ollama_model = st.text_input(
                 "Ollama Model",
                 value=os.getenv("OLLAMA_LLM_MODEL", "llama2"),
                 help="Local Ollama model name"
             )
-            
             if st.button("🧪 Test Ollama Connection"):
-                st.info("ℹ️ Connection test would validate local Ollama installation")
-        
-        else:  # none
+                try:
+                    resp = requests.post("http://localhost:11434/api/tags")
+                    if resp.status_code == 200:
+                        st.success("✅ Ollama is running locally!")
+                    else:
+                        st.error("❌ Ollama not responding")
+                except Exception as e:
+                    st.error(f"❌ Ollama connection error: {str(e)}")
+
+        else:
             st.markdown("**❌ No LLM Provider**")
-            st.warning("⚠️ Agent will run with keyword-only responses (no LLM generation)")
-    
+            st.warning("⚠️ Agent will run with keyword-only responses")
+
+    # ------------------------------
     # Embeddings Configuration
+    # ------------------------------
     with st.expander("🧠 Embeddings Configuration"):
-        st.markdown("**Configure embedding model for RAG system**")
-        
         embed_options = ["openai", "ollama", "none"]
         env_ep = os.getenv("EMBED_PROVIDER", "ollama").lower()
         try:
             ep_index = embed_options.index(env_ep)
         except ValueError:
-            ep_index = embed_options.index("ollama")
-        embed_provider = st.selectbox(
-            "Embedding Provider",
-            options=embed_options,
-            index=ep_index,
-            help="Choose embedding provider for document search"
-        )
-        
+            ep_index = 1
+
+        embed_provider = st.selectbox("Embedding Provider", options=embed_options, index=ep_index)
+        openai_embed_model = ollama_embed_model = ""
+
         if embed_provider == "openai":
             openai_embed_model = st.selectbox(
                 "OpenAI Embedding Model",
                 options=["text-embedding-3-small", "text-embedding-3-large", "text-embedding-ada-002"],
-                index=0,
-                help="OpenAI embedding model for RAG"
+                index=0
             )
-        
         elif embed_provider == "ollama":
             ollama_embed_model = st.text_input(
                 "Ollama Embedding Model",
-                value=os.getenv("EMBED_MODEL", "nomic-embed-text"),
-                help="Local Ollama embedding model name"
+                value=os.getenv("EMBED_MODEL", "nomic-embed-text")
             )
-        
-        else:  # none
-            st.warning("⚠️ Vector search disabled - will use keyword-based search only")
-    
-    # ChromaDB Configuration (Optional)
+        else:
+            st.warning("⚠️ Vector search disabled")
+
+    # ------------------------------
+    # ChromaDB Configuration
+    # ------------------------------
     with st.expander("🗄️ ChromaDB Configuration (Optional)"):
-        st.markdown("**For advanced vector storage (optional)**")
-        
         col1, col2 = st.columns(2)
-        
         with col1:
-            chroma_host = st.text_input(
-                "Chroma Host",
-                value=os.getenv("CHROMA_HOST", ""),
-                help="ChromaDB host URL (leave empty for local)"
-            )
-        
+            chroma_host = st.text_input("Chroma Host", value=os.getenv("CHROMA_HOST", ""))
         with col2:
-            chroma_api_key = st.text_input(
-                "Chroma API Key",
-                value=os.getenv("CHROMA_API_KEY", ""),
-                type="password",
-                help="ChromaDB API key (if using cloud)"
-            )
-    
-    # Save credentials
+            chroma_api_key = st.text_input("Chroma API Key", value=os.getenv("CHROMA_API_KEY", ""), type="password")
+
+    # ------------------------------
+    # Save All Credentials
+    # ------------------------------
     if st.button("💾 Save API Credentials", type="primary"):
-        # In a real implementation, you'd save these to a secure configuration file
-        st.success("✅ API credentials saved successfully!")
-        st.info("ℹ️ Credentials would be securely saved to environment configuration")
+        env_path = ".env"
+        if reddit_client_id: set_key(env_path, "REDDIT_CLIENT_ID", reddit_client_id)
+        if reddit_client_secret: set_key(env_path, "REDDIT_CLIENT_SECRET", reddit_client_secret)
+        if reddit_username: set_key(env_path, "REDDIT_USERNAME", reddit_username)
+        if reddit_password: set_key(env_path, "REDDIT_PASSWORD", reddit_password)
+        if reddit_user_agent: set_key(env_path, "USER_AGENT", reddit_user_agent)
+
+        if groq_api_key: set_key(env_path, "GROQ_API_KEY", groq_api_key)
+        if groq_model: set_key(env_path, "GROQ_MODEL", groq_model)
+
+        if openai_api_key: set_key(env_path, "OPENAI_API_KEY", openai_api_key)
+        if openai_model: set_key(env_path, "OPENAI_MODEL", openai_model)
+
+        if ollama_model: set_key(env_path, "OLLAMA_LLM_MODEL", ollama_model)
+
+        if embed_provider: set_key(env_path, "EMBED_PROVIDER", embed_provider)
+        if openai_embed_model: set_key(env_path, "OPENAI_EMBED_MODEL", openai_embed_model)
+        if ollama_embed_model: set_key(env_path, "EMBED_MODEL", ollama_embed_model)
+
+        if chroma_host: set_key(env_path, "CHROMA_HOST", chroma_host)
+        if chroma_api_key: set_key(env_path, "CHROMA_API_KEY", chroma_api_key)
+
+        st.success("✅ API credentials saved to `.env` successfully!")
+        st.info("ℹ️ Restart the app to reload environment variables.")
+
+
+from utils.database import DatabaseManager
+db = DatabaseManager()
 
 def render_agent_settings():
     """Render agent operational settings"""
@@ -257,6 +286,10 @@ def render_agent_settings():
     st.markdown("### 🤖 Agent Operational Settings")
     st.markdown("Configure how your agent behaves and operates.")
     
+    # Initialize session_state storage for subreddits
+    if "monitored_subreddits" not in st.session_state:
+        st.session_state.monitored_subreddits = ["python", "learnpython", "django"]
+
     # Basic Agent Settings
     with st.expander("⚙️ Basic Settings", expanded=True):
         col1, col2 = st.columns(2)
@@ -312,17 +345,25 @@ def render_agent_settings():
     with st.expander("📋 Subreddit Monitoring"):
         st.markdown("**Configure which subreddits to monitor**")
         
-        # Default subreddits
-        default_subreddits = ["python", "learnpython", "django", "flask", "MachineLearning"]
+        available_subreddits = [
+            "python", "learnpython", "django", "flask", "MachineLearning",
+            "programming", "webdev", "datascience", "tensorflow"
+        ]
         
-        monitored_subreddits = st.multiselect(
+        # ✅ filter defaults so they are valid
+        valid_defaults = [
+            sub for sub in st.session_state.monitored_subreddits
+            if sub in available_subreddits
+        ]
+        
+        st.session_state.monitored_subreddits = st.multiselect(
             "Subreddits to Monitor",
-            options=default_subreddits + ["programming", "webdev", "datascience", "tensorflow"],
-            default=default_subreddits[:3],
+            options=available_subreddits,
+            default=valid_defaults,
             help="Select subreddits for the agent to monitor"
         )
         
-        # Custom subreddit addition
+        # Add custom subreddit
         col1, col2 = st.columns([3, 1])
         with col1:
             custom_subreddit = st.text_input(
@@ -330,16 +371,17 @@ def render_agent_settings():
                 placeholder="Enter subreddit name (without r/)"
             )
         with col2:
-            if st.button("➕ Add"):
-                if custom_subreddit and custom_subreddit not in monitored_subreddits:
-                    monitored_subreddits.append(custom_subreddit)
+            if st.button("➕ Add") and custom_subreddit:
+                if custom_subreddit not in st.session_state.monitored_subreddits:
+                    st.session_state.monitored_subreddits.append(custom_subreddit)
                     st.success(f"Added r/{custom_subreddit}!")
+                    print("nothing")
+                print("button pressed")
     
     # Search Keywords
     with st.expander("🔍 Search Keywords"):
         st.markdown("**Configure keywords to search for within monitored subreddits**")
         
-        # Predefined keyword categories
         keyword_categories = {
             "Installation": ["install", "setup", "installation", "pip install"],
             "Beginner Questions": ["beginner", "new to", "getting started", "how do i"],
@@ -348,14 +390,13 @@ def render_agent_settings():
         }
         
         for category, keywords in keyword_categories.items():
-            selected_keywords = st.multiselect(
+            st.multiselect(
                 f"{category} Keywords",
                 options=keywords,
                 default=keywords[:2],
                 help=f"Keywords related to {category.lower()}"
             )
         
-        # Custom keywords
         custom_keywords = st.text_area(
             "Custom Keywords (one per line)",
             placeholder="Enter custom search keywords, one per line",
@@ -370,10 +411,13 @@ def render_agent_settings():
             "confidence_threshold": confidence_threshold,
             "max_requests_per_hour": max_requests_per_hour,
             "max_reply_length": max_reply_length,
-            "monitored_subreddits": monitored_subreddits,
+            "monitored_subreddits": st.session_state.monitored_subreddits,
             "custom_keywords": custom_keywords.split('\n') if custom_keywords else []
         }
+        
+        db.save_agent_settings(settings)
         st.success("✅ Agent settings saved successfully!")
+        st.json(settings)  # for debugging
 
 def render_rag_settings():
     """Render RAG system configuration"""

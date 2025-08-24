@@ -9,7 +9,9 @@ import plotly.graph_objects as go
 import plotly.express as px
 
 # Add parent directories to path for imports
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if parent_dir not in sys.path:
+    sys.path.insert(0, parent_dir)
 
 from utils.database import DatabaseManager
 from utils.helpers import (
@@ -460,13 +462,13 @@ def render_data_table(filtered_data, db):
                         if st.button("✅ Approve", key=f"approve_log_{request['id']}"):
                             db.update_request_status(request['id'], 'approved', request.get('drafted_reply'))
                             st.success("Approved!")
-                            st.experimental_rerun()
+                            st.rerun()
                     
                     with action_col2:
                         if st.button("❌ Reject", key=f"reject_log_{request['id']}"):
                             db.update_request_status(request['id'], 'rejected')
                             st.error("Rejected!")
-                            st.experimental_rerun()
+                            st.rerun()
             
             # Show content in expandable sections
             if request.get('post_content'):

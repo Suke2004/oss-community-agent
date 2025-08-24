@@ -11,7 +11,9 @@ import threading
 import json
 
 # Ensure 'apps/ui' is on sys.path so 'utils' package can be imported reliably
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if base_dir not in sys.path:
+    sys.path.insert(0, base_dir)
 
 from utils.database import DatabaseManager
 
