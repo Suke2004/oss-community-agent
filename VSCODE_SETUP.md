@@ -66,18 +66,21 @@ pip install -r infra/requirements.txt
 - Select "🔧 Setup Environment"
 
 #### Manual Setup
+1) Copy the example env file at the project root:
 ```bash
-cp apps/ui/.env.example apps/ui/.env
+cp .env.example .env
 ```
-
-Then edit `apps/ui/.env` with your API keys:
+2) Edit the root `.env` with your API keys:
 ```env
 REDDIT_CLIENT_ID=your_reddit_client_id
 REDDIT_CLIENT_SECRET=your_reddit_client_secret
 REDDIT_USERNAME=your_reddit_username
 REDDIT_PASSWORD=your_reddit_password
 OPENAI_API_KEY=your_openai_api_key
+LLM_PROVIDER=none   # optional for local demo without LLM
 ```
+
+All components (UI, agent, tools) read from the single root `.env` now. Remove any old per-app .env files.
 
 ## 🚀 Running the Project
 
@@ -98,7 +101,7 @@ The Streamlit app will start and automatically open in your browser at `http://l
 ### Method 3: Using Terminal
 
 ```bash
-python run_ui.py
+python run_ui.py  # Uses the root .env automatically
 ```
 
 ### Method 4: Direct Streamlit Command
@@ -187,7 +190,7 @@ pip install -r infra/requirements.txt
 ```
 
 #### 4. Environment variables not loaded
-- Make sure `.env` file exists in `apps/ui/`
+- Make sure a `.env` file exists at the project root
 - Check that all required variables are set
 
 #### 5. Port already in use
