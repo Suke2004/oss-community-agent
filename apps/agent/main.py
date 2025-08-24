@@ -8,15 +8,23 @@ import time
 from dotenv import load_dotenv
 from typing import Dict, Any, Optional
 
-# Import Portia AI SDK components
-from portia import Portia, PlanBuilder, Clarification
-from portia.models import ToolCall, PlanRunState, PlanRunStatus
-from portia.tool_registry import PortiaToolRegistry
+# Import Portia AI SDK components (with fallback to mock)
+try:
+    from portia import Portia, PlanBuilder, Clarification
+    from portia.models import ToolCall, PlanRunState, PlanRunStatus
+    from portia.tool_registry import PortiaToolRegistry
+    print("✅ Using real Portia SDK")
+except ImportError:
+    print("⚠️ Portia SDK not available, using mock implementation")
+    import sys
+    import os
+    sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+    from mock_portia import Portia, PlanBuilder, Clarification, ToolCall, PlanRunState, PlanRunStatus, PortiaToolRegistry
 
 # Import your custom tools
 from tools.reddit_tool import RedditTool
 from tools.rag_tool import RAGTool
-from tools.moderation_tool import analyze_text as ModerationTool_analyze_text
+from tools.moderation_tools import analyze_text as ModerationTool_analyze_text
 
 # --- Configuration & Logging ---
 load_dotenv() # Load environment variables from .env file
@@ -26,16 +34,28 @@ logging.basicConfig(
 )
 
 # Initialize API keys and settings
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY") # For RAGTool's LLM
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "openai").lower()
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 REDDIT_CLIENT_ID = os.getenv("REDDIT_CLIENT_ID")
 REDDIT_CLIENT_SECRET = os.getenv("REDDIT_CLIENT_SECRET")
 REDDIT_USERNAME = os.getenv("REDDIT_USERNAME")
 REDDIT_PASSWORD = os.getenv("REDDIT_PASSWORD")
 DRY_RUN = os.getenv("DRY_RUN", "True").lower() == "true" # Default to dry run
 
-# Ensure essential API keys are available
-if not OPENAI_API_KEY:
-    raise ValueError("OPENAI_API_KEY not found in environment variables.")
+# Ensure LLM API keys are available based on provider
+if LLM_PROVIDER == "openai" and not OPENAI_API_KEY:
+    raise ValueError("OPENAI_API_KEY not found in environment variables when using OpenAI provider.")
+elif LLM_PROVIDER == "groq" and not GROQ_API_KEY:
+    raise ValueError("GROQ_API_KEY not found in environment variables when using Groq provider.")
+elif LLM_PROVIDER == "ollama":
+    logging.info("Using Ollama provider - no API key required (assuming local installation).")
+elif LLM_PROVIDER == "none":
+    logging.warning("LLM provider set to 'none' - agent will run without LLM capabilities.")
+else:
+    logging.warning(f"Unknown LLM provider '{LLM_PROVIDER}' - defaulting to keyword-only responses.")
+
+# Ensure Reddit API credentials are available
 if not REDDIT_CLIENT_ID or not REDDIT_CLIENT_SECRET or not REDDIT_USERNAME or not REDDIT_PASSWORD:
     raise ValueError("Reddit API credentials (CLIENT_ID, CLIENT_SECRET, USERNAME, PASSWORD) not found in environment variables.")
 
@@ -152,139 +172,66 @@ def run_oss_agent(query: str, subreddit: str, submission_id: Optional[str] = Non
             output_variable="reddit_posts"
         )
 
-        # Step 2: Select a specific post to reply to
+        # Step 2: Draft a reply using the RAG tool
         plan_builder.add_step(
-            name="select_post_to_reply",
-            description="Selects the most relevant Reddit post to reply to.",
-            code_block=f"""
-if '{submission_id}' != 'None':
-    selected_post_id = '{submission_id}'
-    selected_post_title = 'User-specified submission'
-    selected_post_body = 'N/A'
-else:
-    posts = {{plan_run.reddit_posts}}
-    if not posts:
-        logging.info(f"[{plan_run.run_id}] No relevant Reddit posts found.")
-        selected_post_id = None
-        selected_post_title = None
-        selected_post_body = None
-    else:
-        selected_post = posts[0]
-        selected_post_id = selected_post.get('id')
-        selected_post_title = selected_post.get('title')
-        selected_post_body = selected_post.get('selftext', '')
-        logging.info(f"[{plan_run.run_id}] Selected post: '{{selected_post_title}}' (ID: {{selected_post_id}})")
-
-plan_run.selected_post_id = selected_post_id
-plan_run.selected_post_title = selected_post_title
-plan_run.selected_post_body = selected_post_body
-            """,
-            input_variables=["reddit_posts"],
-            output_variables=["selected_post_id", "selected_post_title", "selected_post_body"]
+            name="draft_reply",
+            tool_call=ToolCall(
+                name="draft_reply_from_docs",
+                args={"query": f"{query} on subreddit {subreddit}"}
+            ),
+            output_variable="drafted_reply"
         )
 
-        # Conditional step: Only proceed if a post was selected
-        plan_builder.add_conditional_step(
-            name="check_if_post_selected",
-            condition="plan_run.selected_post_id is not None",
-            steps=[
-                # Step 3: Draft a reply using the RAG tool
-                plan_builder.add_step(
-                    name="draft_reply",
-                    tool_call=ToolCall(
-                        name="draft_reply_from_docs",
-                        args={"query": "{{plan_run.selected_post_title}} {{plan_run.selected_post_body}}"}
-                    ),
-                    output_variable="drafted_reply"
-                ),
+        # Step 3: Moderate the drafted reply
+        plan_builder.add_step(
+            name="moderate_draft",
+            tool_call=ToolCall(
+                name="moderate_text_for_issues",
+                args={"text": "{{drafted_reply}}"}
+            ),
+            output_variable="moderation_report"
+        )
 
-                # Step 4: Moderate the drafted reply
-                plan_builder.add_step(
-                    name="moderate_draft",
-                    tool_call=ToolCall(
-                        name="moderate_text_for_issues",
-                        args={"text": "{{plan_run.drafted_reply}}"}
-                    ),
-                    output_variable="moderation_report"
+        # Step 4: Human-in-the-loop clarification
+        plan_builder.add_step(
+            name="request_human_clarification",
+            tool_call=Clarification(
+                message=(
+                    "An AI-drafted reply is ready for your review for Reddit query "
+                    f"**'{query}'** on subreddit **'{subreddit}'**.\n\n"
+                    "**Moderation Report:**\n```json\n{{moderation_report}}\n```\n\n"
+                    "**Proposed Reply:**\n```\n{{drafted_reply}}\n```\n\n"
+                    "Please approve, edit, or reject this reply."
                 ),
+                expected_response_schema={
+                    "type": "object",
+                    "properties": {
+                        "action": {"type": "string", "enum": ["approve", "reject", "edit"]},
+                        "edited_reply": {"type": "string", "description": "The human-edited version of the reply (if 'edit' action).", "default": ""},
+                        "reason": {"type": "string", "description": "Optional reason for action."}
+                    },
+                    "required": ["action"]
+                }
+            ),
+            output_variable="clarification_response"
+        )
 
-                # Step 5: Human-in-the-loop clarification
-                plan_builder.add_step(
-                    name="request_human_clarification",
-                    tool_call=Clarification(
-                        message=(
-                            "An AI-drafted reply is ready for your review for Reddit post "
-                            f"**'{{plan_run.selected_post_title}}'** (ID: {{plan_run.selected_post_id}}).\n\n"
-                            f"**Moderation Report:**\n```json\n{{json.dumps(plan_run.moderation_report, indent=2)}}\n```\n\n"
-                            "**Proposed Reply:**\n```\n{{plan_run.drafted_reply}}\n```\n\n"
-                            "Please approve, edit, or reject this reply."
-                        ),
-                        expected_response_schema={
-                            "type": "object",
-                            "properties": {
-                                "action": {"type": "string", "enum": ["approve", "reject", "edit"]},
-                                "edited_reply": {"type": "string", "description": "The human-edited version of the reply (if 'edit' action).", "default": ""},
-                                "reason": {"type": "string", "description": "Optional reason for action."}
-                            },
-                            "required": ["action"]
-                        }
-                    ),
-                    output_variable="clarification_response"
-                ),
-
-                # Conditional Step: Handle clarification response
-                plan_builder.add_conditional_step(
-                    name="handle_clarification_response",
-                    condition="plan_run.clarification_response.get('action') == 'approve'",
-                    steps=[
-                        # Step 6: Post the reply to Reddit (only if not in dry run mode)
-                        plan_builder.add_conditional_step(
-                            name="post_reply_to_reddit",
-                            condition=f"not {DRY_RUN}",
-                            steps=[
-                                plan_builder.add_step(
-                                    name="execute_post_reddit_reply",
-                                    tool_call=ToolCall(
-                                        name="post_reddit_reply",
-                                        args={
-                                            "submission_id": "{{plan_run.selected_post_id}}",
-                                            "reply_text": "{{plan_run.clarification_response.get('edited_reply') or plan_run.drafted_reply}}"
-                                        }
-                                    ),
-                                    output_variable="reddit_post_result"
-                                )
-                            ],
-                            else_steps=[
-                                plan_builder.add_step(
-                                    name="dry_run_post_simulation",
-                                    description="Simulating Reddit post in dry run mode.",
-                                    code_block="plan_run.reddit_post_result = {'status': 'simulated_success', 'message': 'Post simulated successfully in dry run mode.'}"
-                                )
-                            ]
-                        )
-                    ],
-                    else_steps=[
-                        plan_builder.add_step(
-                            name="handle_rejected_or_edited_reply",
-                            description="Human rejected or edited the reply. No automated post.",
-                            code_block="""
-if plan_run.clarification_response.get('action') == 'reject':
-    logging.info(f"[{plan_run.run_id}] Reply rejected by human: {{plan_run.clarification_response.get('reason', 'No reason provided')}}")
-elif plan_run.clarification_response.get('action') == 'edit':
-    logging.info(f"[{plan_run.run_id}] Reply edited by human.")
-plan_run.reddit_post_result = {'status': 'skipped', 'message': 'Post skipped due to human intervention.'}
-                            """
-                        )
-                    ]
-                )
-            ],
-            else_steps=[
-                plan_builder.add_step(
-                    name="no_post_action",
-                    description="No action taken as no relevant post was selected.",
-                    code_block="logging.info(f'[{plan_run.run_id}] No relevant Reddit post found to process.')"
-                )
-            ]
+        # Step 5: Handle clarification response
+        plan_builder.add_step(
+            name="handle_clarification_response",
+            description="Process the human clarification response.",
+            code_block="""
+if clarification_response.get('action') == 'approve':
+    reddit_post_result = {'status': 'approved', 'message': 'Reply approved by human.'}
+elif clarification_response.get('action') == 'reject':
+    reddit_post_result = {'status': 'rejected', 'message': 'Reply rejected by human.'}
+elif clarification_response.get('action') == 'edit':
+    reddit_post_result = {'status': 'edited', 'message': 'Reply edited by human.'}
+else:
+    reddit_post_result = {'status': 'unknown', 'message': 'Unknown action.'}
+            """,
+            input_variables=["clarification_response"],
+            output_variables=["reddit_post_result"]
         )
 
         # 2. Compile and Run the Plan
