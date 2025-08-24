@@ -1,0 +1,19 @@
+# Local
+RAG_CORPUS_DIR=data/corpus
+RAG_DB_DIR=rag_db
+RAG_COLLECTION=oss_docs
+
+# Chroma Cloud
+CHROMA_HOST=https://api.trychroma.com
+CHROMA_API_KEY=your-chroma-api-key
+
+# Embeddings
+EMBED_PROVIDER=openai
+OPENAI_API_KEY=your-openai-key
+OPENAI_EMBED_MODEL=text-embedding-3-small
+
+# LLM
+LLM_PROVIDER=openai
+OPENAI_MODEL=gpt-4o-mini
+
+TOP_K=4
