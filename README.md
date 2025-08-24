@@ -60,7 +60,7 @@ oss-community-agent/
 │   └── scrape_tool.py                  # (Optional) ScrapeGraphAI web scraper
 ├── .gitignore                          # Git ignore file
 ├── README.md                           # This file
-└── README_DEMO.md                      # Step-by-step demo script
+└── README_DEMO.md                      # Step-by-step demo script (optional, see README_DEMO.md if present)
 ```
 
 ***
@@ -93,11 +93,19 @@ oss-community-agent/
 
 ### Running the Demo
 
-1.  **Run the Streamlit app:**
+1.  Windows (PowerShell):
+    - UI only: `pwsh -ExecutionPolicy Bypass -File .\start.ps1 -UIOnly`
+    - Full system (UI + backend): `pwsh -ExecutionPolicy Bypass -File .\start.ps1`
+
+2.  Cross-platform via Python launchers:
+    - UI only: `python run_ui.py`
+    - Full system: `python run_full_system.py`
+
+3.  Direct Streamlit (advanced):
     ```bash
-    streamlit run apps/ui/streamlit_app.py
+    python -m streamlit run apps/ui/streamlit_app.py
     ```
-2.  A web browser will open, and you'll see the agent's UI. This interface is the core of your demo.
+4.  A web browser will open, and you'll see the agent's UI. This interface is the core of your demo.
 
 ***
 

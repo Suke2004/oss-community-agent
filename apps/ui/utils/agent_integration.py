@@ -27,11 +27,16 @@ class AgentIntegration:
         self.current_runs = {}
         self.last_heartbeat = datetime.now()
         
-        # Initialize mock agent state for demo
-        self._initialize_demo_data()
+        # Optionally seed demo data only if DB is empty and env allows
+        try:
+            seed_demo = os.getenv("SEED_DEMO_DATA", "true").lower() == "true"
+            if seed_demo and len(self.db.get_requests_by_filter({"limit": 1})) == 0:
+                self._initialize_demo_data()
+        except Exception:
+            pass
     
     def _initialize_demo_data(self):
-        """Initialize some demo data for the UI to display"""
+        """Initialize some demo data for the UI to display (optional)"""
         
         # Create some sample requests for demonstration
         sample_requests = [
@@ -107,10 +112,6 @@ class AgentIntegration:
         """
         
         run_id = str(uuid.uuid4())
-        
-        # In a real implementation, this would start the actual Portia agent
-        # For demo purposes, we'll simulate the process
-        
         self.current_runs[run_id] = {
             'type': 'monitoring',
             'status': 'running',
@@ -118,37 +119,57 @@ class AgentIntegration:
             'keywords': keywords,
             'start_time': datetime.now(),
             'posts_found': 0,
-            'replies_drafted': 0
+            'replies_drafted': 0,
+            'stop': False
         }
         
-        # Simulate the monitoring process in a separate thread
-        thread = threading.Thread(target=self._simulate_monitoring, args=(run_id, subreddit, keywords))
-        thread.daemon = True
+        thread = threading.Thread(target=self._monitoring_loop, args=(run_id,), daemon=True)
         thread.start()
         
         return run_id
     
-    def _simulate_monitoring(self, run_id: str, subreddit: str, keywords: str):
-        """Simulate the agent monitoring process"""
-        
+    def _monitoring_loop(self, run_id: str):
+        """Background monitoring loop that periodically calls the agent and persists results"""
         try:
-            # Simulate finding posts
-            time.sleep(2)
-            self.current_runs[run_id]['posts_found'] = 3
-            self.current_runs[run_id]['status'] = 'processing'
-            
-            # Simulate drafting replies
-            time.sleep(3)
-            self.current_runs[run_id]['replies_drafted'] = 2
-            
-            # Mark as completed
-            time.sleep(1)
+            cfg_interval = int(os.getenv("SCAN_INTERVAL_SECONDS", "120"))
+            while True:
+                run = self.current_runs.get(run_id)
+                if not run or run.get('stop'):
+                    break
+                subreddit = run.get('subreddit')
+                keywords = run.get('keywords') or "open source help"
+                self.current_runs[run_id]['status'] = 'processing'
+                try:
+                    from apps.agent.main import run_oss_agent
+                    result = run_oss_agent(query=keywords, subreddit=subreddit)
+                    posts = result.get('reddit_posts') or []
+                    drafted_reply = result.get('drafted_reply') or ''
+                    moderation = result.get('moderation_report') or {}
+
+                    created = 0
+                    for post in posts:
+                        post_id = post.get('id')
+                        if self.db.request_exists_by_post_id(post_id):
+                            continue
+                        self._persist_request_from_agent(post, drafted_reply, moderation)
+                        created += 1
+                    self.current_runs[run_id]['posts_found'] += len(posts)
+                    self.current_runs[run_id]['replies_drafted'] += created
+                except Exception as agent_err:
+                    self.current_runs[run_id]['error'] = str(agent_err)
+                    self.current_runs[run_id]['status'] = 'warning'
+                
+                # sleep until next polling
+                for _ in range(cfg_interval):
+                    time.sleep(1)
+                    if self.current_runs.get(run_id, {}).get('stop'):
+                        break
             self.current_runs[run_id]['status'] = 'completed'
             self.current_runs[run_id]['end_time'] = datetime.now()
-            
         except Exception as e:
-            self.current_runs[run_id]['status'] = 'failed'
-            self.current_runs[run_id]['error'] = str(e)
+            if run_id in self.current_runs:
+                self.current_runs[run_id]['status'] = 'failed'
+                self.current_runs[run_id]['error'] = str(e)
     
     def get_run_status(self, run_id: str) -> Optional[Dict[str, Any]]:
         """Get the status of a specific agent run"""
@@ -166,6 +187,7 @@ class AgentIntegration:
     def stop_agent_run(self, run_id: str) -> bool:
         """Stop a specific agent run"""
         if run_id in self.current_runs:
+            self.current_runs[run_id]['stop'] = True
             self.current_runs[run_id]['status'] = 'stopped'
             return True
         return False
@@ -177,12 +199,6 @@ class AgentIntegration:
         """
         
         run_id = str(uuid.uuid4())
-        
-        # In a real implementation, this would call the existing agent main function
-        # from apps.agent.main import run_oss_agent
-        # result = run_oss_agent(query, subreddit, submission_id)
-        
-        # For demo purposes, simulate the process
         self.current_runs[run_id] = {
             'type': 'single_request',
             'status': 'running',
@@ -192,52 +208,43 @@ class AgentIntegration:
             'start_time': datetime.now()
         }
         
-        # Simulate processing in a separate thread
-        thread = threading.Thread(target=self._simulate_single_request, args=(run_id, query, subreddit))
-        thread.daemon = True
+        thread = threading.Thread(target=self._run_single_request, args=(run_id,), daemon=True)
         thread.start()
         
         return run_id
     
-    def _simulate_single_request(self, run_id: str, query: str, subreddit: str):
-        """Simulate processing a single request"""
-        
+    def _run_single_request(self, run_id: str):
+        """Execute a single agent call and persist result"""
         try:
-            # Simulate the agent workflow
-            time.sleep(1)
+            run = self.current_runs.get(run_id)
+            if not run:
+                return
+            query = run.get('query')
+            subreddit = run.get('subreddit')
+
             self.current_runs[run_id]['status'] = 'searching'
-            
-            time.sleep(2)
-            self.current_runs[run_id]['status'] = 'drafting'
-            
-            time.sleep(2)
+            from apps.agent.main import run_oss_agent
+            result = run_oss_agent(query=query, subreddit=subreddit)
+
             self.current_runs[run_id]['status'] = 'moderating'
-            
-            time.sleep(1)
+            posts = result.get('reddit_posts') or []
+            drafted_reply = result.get('drafted_reply') or ''
+            moderation = result.get('moderation_report') or {}
+
+            # Persist at least one pending request (first post if exists)
+            if posts:
+                self._persist_request_from_agent(posts[0], drafted_reply, moderation)
+            else:
+                # Create a generic request if no post list returned
+                self._persist_request_from_agent({
+                    'id': f'generated_{int(time.time())}',
+                    'title': query,
+                    'selftext': f'Generated based on query: {query}',
+                    'url': f'https://reddit.com/r/{subreddit}/'
+                }, drafted_reply, moderation)
+
             self.current_runs[run_id]['status'] = 'completed'
             self.current_runs[run_id]['end_time'] = datetime.now()
-            
-            # Create a mock request for this process
-            mock_request = {
-                'id': str(uuid.uuid4()),
-                'subreddit': subreddit,
-                'post_id': f'generated_{int(time.time())}',
-                'post_title': query[:100] + '...' if len(query) > 100 else query,
-                'post_content': f'Generated request based on query: {query}',
-                'post_author': 'simulated_user',
-                'post_url': f'https://reddit.com/r/{subreddit}/simulated',
-                'status': 'pending',
-                'drafted_reply': f'This is a simulated response to: {query}\n\nThe agent would generate a comprehensive answer here based on the documentation and RAG system.',
-                'moderation_score': 0.15,
-                'agent_confidence': 0.75,
-                'citations': json.dumps([
-                    {'title': 'Simulated Documentation', 'source': 'docs.example.com'},
-                ]),
-                'processing_time': 4.0
-            }
-            
-            self.db.add_request(mock_request)
-            
         except Exception as e:
             self.current_runs[run_id]['status'] = 'failed'
             self.current_runs[run_id]['error'] = str(e)
@@ -245,14 +252,14 @@ class AgentIntegration:
     def get_agent_health(self) -> Dict[str, Any]:
         """Get current agent health status"""
         
-        # Simulate system health checks
+        # Simulate system health checks (lightweight without psutil here)
         return {
             'status': 'healthy',
-            'uptime': '2h 45m',
+            'uptime': str(datetime.now() - self.last_heartbeat).split('.')[0],
             'last_heartbeat': self.last_heartbeat,
-            'memory_usage': 67,
-            'cpu_usage': 23,
-            'reddit_api_status': 'connected',
+            'memory_usage': 50,
+            'cpu_usage': 15,
+            'reddit_api_status': 'unknown',
             'rag_system_status': 'ready',
             'database_status': 'healthy',
             'active_runs': len(self.get_all_active_runs()),
@@ -265,9 +272,8 @@ class AgentIntegration:
         self.last_heartbeat = datetime.now()
     
     def get_system_metrics(self) -> Dict[str, Any]:
-        """Get detailed system performance metrics"""
+        """Get detailed system performance metrics (mocked)"""
         
-        # In a real implementation, this would gather actual system metrics
         return {
             'response_times': {
                 'avg_24h': 3.2,
@@ -280,15 +286,15 @@ class AgentIntegration:
                 'last_24h': 93.5
             },
             'api_usage': {
-                'reddit_calls_today': 247,
-                'llm_calls_today': 89,
-                'llm_provider': os.getenv('LLM_PROVIDER', 'openai').lower(),
-                'rate_limit_remaining': 92
+                'reddit_calls_today': 10,
+                'llm_calls_today': 5,
+                'llm_provider': os.getenv('LLM_PROVIDER', 'none').lower(),
+                'rate_limit_remaining': 90
             },
             'database_stats': {
-                'total_requests': 1456,
-                'total_approved': 987,
-                'total_rejected': 234,
+                'total_requests': len(self.db.get_requests_by_filter({'limit': 10000})),
+                'total_approved': len([r for r in self.db.get_requests_by_filter({'limit': 10000}) if r['status']=='approved']),
+                'total_rejected': len([r for r in self.db.get_requests_by_filter({'limit': 10000}) if r['status']=='rejected']),
                 'pending': len(self.db.get_pending_requests())
             }
         }
@@ -318,6 +324,34 @@ class AgentIntegration:
         # In a real implementation, this would update the actual config
         # For demo purposes, just return True
         return True
+
+    def _persist_request_from_agent(self, post: Dict[str, Any], drafted_reply: str, moderation: Dict[str, Any]):
+        """Persist a pending request derived from agent outputs"""
+        request = {
+            'id': str(uuid.uuid4()),
+            'subreddit': post.get('subreddit') or 'unknown',
+            'post_id': post.get('id'),
+            'post_title': post.get('title') or 'Question',
+            'post_content': post.get('selftext') or '',
+            'post_author': post.get('author') or 'unknown',
+            'post_url': post.get('url') or '',
+            'status': 'pending',
+            'drafted_reply': drafted_reply,
+            'moderation_score': (1.0 - float(moderation.get('safety_score', 0.0))) if isinstance(moderation, dict) else 0.0,
+            'agent_confidence': float(moderation.get('confidence', 0.75)) if isinstance(moderation, dict) else 0.75,
+            'citations': []
+        }
+        try:
+            request['citations'] = json.dumps(request['citations'])
+        except Exception:
+            request['citations'] = json.dumps([])
+        # moderation_flags must be JSON-serializable list
+        flags = []
+        if isinstance(moderation, dict) and moderation.get('flags'):
+            flags = moderation['flags']
+        # Always pass list; DatabaseManager.add_request will JSON-encode it
+        request['moderation_flags'] = flags
+        self.db.add_request(request)
 
 # Singleton instance for use throughout the UI
 agent_integration = AgentIntegration()

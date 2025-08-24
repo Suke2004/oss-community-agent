@@ -62,6 +62,9 @@ chroma_db/
 # Streamlit cache
 .streamlit/
 
+# Legacy UI database directory (use data/agent_data.db instead)
+apps/ui/data/
+
 # ScrapeGraphAI cache
 scrapegraphai_cache/
 

@@ -379,10 +379,9 @@ def render_rag_settings():
     with st.expander("📄 Document Management", expanded=True):
         st.markdown("**Manage your knowledge base documents**")
         
-        # Document upload
         uploaded_files = st.file_uploader(
             "Upload Documentation",
-            type=['txt', 'md', 'pdf'],
+            type=['txt', 'md'],
             accept_multiple_files=True,
             help="Upload documentation files for the RAG system"
         )
@@ -390,36 +389,43 @@ def render_rag_settings():
         if uploaded_files:
             st.info(f"📁 {len(uploaded_files)} file(s) ready to upload")
             
-            if st.button("📤 Process Documents"):
-                for file in uploaded_files:
-                    # In a real implementation, you'd process and index these files
-                    st.success(f"✅ Processed: {file.name}")
+            if st.button("📤 Copy to Corpus & Rebuild"):
+                try:
+                    from pathlib import Path
+                    from tools.rag_tool import RAGTool, RAG_CORPUS_DIR
+                    # Ensure corpus dir exists
+                    Path(RAG_CORPUS_DIR).mkdir(parents=True, exist_ok=True)
+                    # Save uploaded files into corpus
+                    for uf in uploaded_files:
+                        # Streamlit uploads have a .read() interface
+                        content = uf.read()
+                        # Default to .md if no suffix
+                        target = Path(RAG_CORPUS_DIR) / (uf.name if any(uf.name.endswith(ext) for ext in ['.md', '.txt']) else (uf.name + '.md'))
+                        with open(target, 'wb') as f:
+                            f.write(content)
+                    # Rebuild index
+                    rag = RAGTool()
+                    rag.rebuild()
+                    st.success("✅ Files copied to corpus and vector index rebuilt")
+                except Exception as e:
+                    st.error(f"❌ Failed to copy/rebuild: {e}")
         
-        # Current documents status
+        # Current documents status (basic insight)
         st.markdown("**Current Document Status**")
-        
-        # Mock document statistics
-        doc_stats = [
-            {"name": "README.md", "size": "15 KB", "status": "Indexed", "last_updated": "2 hours ago"},
-            {"name": "API_Documentation.md", "size": "32 KB", "status": "Indexed", "last_updated": "1 day ago"},
-            {"name": "FAQ.txt", "size": "8 KB", "status": "Processing", "last_updated": "5 minutes ago"},
-            {"name": "Installation_Guide.pdf", "size": "156 KB", "status": "Indexed", "last_updated": "3 days ago"},
-        ]
-        
-        for doc in doc_stats:
-            status_color = "#10b981" if doc["status"] == "Indexed" else "#f59e0b"
-            st.markdown(f"""
-            <div style="display: flex; justify-content: space-between; align-items: center; padding: 0.75rem; margin-bottom: 0.5rem; background: var(--bg-card); border-radius: 6px; border-left: 3px solid {status_color};">
-                <div>
-                    <strong style="color: var(--text-primary);">{doc['name']}</strong>
-                    <span style="color: var(--text-secondary); margin-left: 1rem;">{doc['size']}</span>
-                </div>
-                <div style="text-align: right;">
-                    <div style="color: {status_color}; font-weight: 600; font-size: 0.8rem;">{doc['status'].upper()}</div>
-                    <div style="color: var(--text-muted); font-size: 0.8rem;">{doc['last_updated']}</div>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
+        try:
+            import os
+            from pathlib import Path
+            from tools.rag_tool import MANIFEST_FILE, load_json
+            corpus = Path(os.getenv('RAG_CORPUS_DIR', 'data/corpus'))
+            files = list(corpus.glob('**/*.*')) if corpus.exists() else []
+            st.write(f"Indexed directory: {corpus} | Files detected: {len(files)}")
+            manifest = load_json(MANIFEST_FILE, {})
+            if manifest:
+                st.write(f"RAG collection: {manifest.get('collection', 'unknown')}")
+                st.write(f"Vector doc_count: {manifest.get('doc_count', 0)}")
+                st.write(f"Last rebuild: {manifest.get('last_rebuild', 'n/a')}")
+        except Exception as e:
+            st.write("Unable to read corpus status or manifest")
     
     # RAG Parameters
     with st.expander("🎛️ RAG Parameters"):
@@ -465,7 +471,16 @@ def render_rag_settings():
     # Vector Database Settings
     with st.expander("🗄️ Vector Database"):
         st.markdown("**Vector storage and retrieval settings**")
-        
+
+        # Live vector DB stats
+        try:
+            from tools.rag_tool import RAGTool
+            rag = RAGTool()
+            has_vector = bool(rag.retriever)
+            st.markdown(f"Vector index: {'✅ Ready' if has_vector else '⚠️ Disabled (keyword fallback)'}")
+        except Exception:
+            st.markdown("Vector index: ⚠️ Error initializing")
+
         vector_store_type = st.selectbox(
             "Vector Store Type",
             options=["ChromaDB (Local)", "ChromaDB (Cloud)", "Pinecone", "Weaviate"],
@@ -491,8 +506,13 @@ def render_rag_settings():
         
         # Rebuild index button
         if st.button("🔄 Rebuild Vector Index"):
-            st.info("🔄 Rebuilding vector index... This may take a few minutes.")
-            st.success("✅ Vector index rebuilt successfully!")
+            try:
+                from tools.rag_tool import RAGTool
+                rag = RAGTool()
+                rag.rebuild()
+                st.success("✅ Vector index rebuilt successfully!")
+            except Exception as e:
+                st.error(f"❌ Failed to rebuild index: {e}")
     
     if st.button("💾 Save RAG Settings", type="primary"):
         st.success("✅ RAG settings saved successfully!")

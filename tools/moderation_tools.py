@@ -46,7 +46,7 @@ def analyze_text(text: str) -> Dict[str, Any]:
     and a list of flagged keywords.
 
     Args:
-        text (str): The text to be analyzed.
+        text (str): The text to be analyzed. May be None or empty.
 
     Returns:
         Dict[str, Any]: A dictionary containing a summary of the moderation results.
@@ -56,12 +56,15 @@ def analyze_text(text: str) -> Dict[str, Any]:
         "flags": []
     }
 
-    # Enhanced profanity checking with context awareness
-    check_profanity(text, report)
+    # Normalize input
+    safe_text = text or ""
 
-    check_pii(text, report)
+    # Enhanced profanity checking with context awareness
+    check_profanity(safe_text, report)
+
+    check_pii(safe_text, report)
     
-    check_keywords(text, report)
+    check_keywords(safe_text, report)
 
     return report
 
@@ -164,7 +167,11 @@ def _validate_pii_match(pii_type: str, matched_text: str, full_text: str) -> flo
     
     elif pii_type == "api_key_pattern":
         # API keys are usually longer and have mixed case
-        key_part = matched_text.split('=')[-1].split(':')[-1].strip('"\' ')
+        try:
+            # Extract the value part after = or : and strip quotes/spaces
+            key_part = re.sub(r"^(?:.*[=:\s])?['\"]?(.+?)['\"]?$", r"\1", matched_text).strip()
+        except Exception:
+            key_part = matched_text
         if len(key_part) >= 20 and any(c.isupper() for c in key_part) and any(c.islower() for c in key_part):
             return 0.8
         return 0.4

@@ -43,32 +43,44 @@ REDDIT_USERNAME = os.getenv("REDDIT_USERNAME")
 REDDIT_PASSWORD = os.getenv("REDDIT_PASSWORD")
 DRY_RUN = os.getenv("DRY_RUN", "True").lower() == "true" # Default to dry run
 
-# Ensure LLM API keys are available based on provider
+# Soft-check LLM keys at import; enforce at runtime inside tool/LLM initializers
 if LLM_PROVIDER == "openai" and not OPENAI_API_KEY:
-    raise ValueError("OPENAI_API_KEY not found in environment variables when using OpenAI provider.")
+    logging.warning("OPENAI_API_KEY not set; will run without OpenAI unless configured before execution.")
 elif LLM_PROVIDER == "groq" and not GROQ_API_KEY:
-    raise ValueError("GROQ_API_KEY not found in environment variables when using Groq provider.")
+    logging.warning("GROQ_API_KEY not set; will run without Groq unless configured before execution.")
 elif LLM_PROVIDER == "ollama":
     logging.info("Using Ollama provider - no API key required (assuming local installation).")
 elif LLM_PROVIDER == "none":
-    logging.warning("LLM provider set to 'none' - agent will run without LLM capabilities.")
+    logging.info("LLM provider set to 'none' - agent will run without LLM capabilities.")
 else:
-    logging.warning(f"Unknown LLM provider '{LLM_PROVIDER}' - defaulting to keyword-only responses.")
+    logging.info(f"LLM provider '{LLM_PROVIDER}' configured.")
 
-# Ensure Reddit API credentials are available
+# Delay Reddit credential validation until first use to avoid import-time failures
 if not REDDIT_CLIENT_ID or not REDDIT_CLIENT_SECRET or not REDDIT_USERNAME or not REDDIT_PASSWORD:
-    raise ValueError("Reddit API credentials (CLIENT_ID, CLIENT_SECRET, USERNAME, PASSWORD) not found in environment variables.")
+    logging.info("Reddit credentials not fully configured yet; will validate on first use.")
 
 # --- Tool Initialization ---
-# Initialize your custom tools
-reddit_tool = RedditTool(
-    client_id=REDDIT_CLIENT_ID,
-    client_secret=REDDIT_CLIENT_SECRET,
-    username=REDDIT_USERNAME,
-    password=REDDIT_PASSWORD,
-    user_agent="oss-community-agent/0.1 (by u/BennyPerumalla)" # IMPORTANT: Use your Reddit username
-)
+# Lazy initialization to avoid import-time failures
+class _LazyRedditToolProxy:
+    def __getattr__(self, name):
+        raise RuntimeError("RedditTool is not initialized yet. Configure Reddit credentials in .env and call through the agent APIs.")
+
+reddit_tool = _LazyRedditToolProxy()
 rag_tool = RAGTool()
+
+def get_reddit_tool() -> RedditTool:
+    global reddit_tool
+    if isinstance(reddit_tool, _LazyRedditToolProxy):
+        if not (REDDIT_CLIENT_ID and REDDIT_CLIENT_SECRET and REDDIT_USERNAME and REDDIT_PASSWORD):
+            raise ValueError("Reddit API credentials (CLIENT_ID, CLIENT_SECRET, USERNAME, PASSWORD) are not configured.")
+        reddit_tool = RedditTool(
+            client_id=REDDIT_CLIENT_ID,
+            client_secret=REDDIT_CLIENT_SECRET,
+            username=REDDIT_USERNAME,
+            password=REDDIT_PASSWORD,
+            user_agent=f"oss-community-agent/0.1 (by u/{REDDIT_USERNAME or 'unknown'})"
+        )
+    return reddit_tool
 
 # --- Portia Initialization ---
 # Initialize Portia with your API key
@@ -77,10 +89,13 @@ portia = Portia(api_key=os.getenv("PORTIA_API_KEY"))
 # Create a custom tool registry for Portia
 # This allows Portia to recognize and call your custom Python functions
 custom_tool_registry = PortiaToolRegistry()
+def search_reddit_questions_tool(subreddit_name: str, keywords: str, limit: int = 5):
+    return get_reddit_tool().search_questions(subreddit_name=subreddit_name, keywords=keywords, limit=limit)
+
 custom_tool_registry.register_tool(
     name="search_reddit_questions",
     description="Searches a specified subreddit for questions matching keywords.",
-    func=reddit_tool.search_questions,
+    func=search_reddit_questions_tool,
     input_schema={
         "type": "object",
         "properties": {
@@ -115,10 +130,13 @@ custom_tool_registry.register_tool(
         "required": ["text"]
     }
 )
+def post_reddit_reply_tool(submission_id: str, reply_text: str):
+    return get_reddit_tool().post_reply(submission_id=submission_id, reply_text=reply_text)
+
 custom_tool_registry.register_tool(
     name="post_reddit_reply",
     description="Posts a reply to a specific Reddit submission.",
-    func=reddit_tool.post_reply,
+    func=post_reddit_reply_tool,
     input_schema={
         "type": "object",
         "properties": {
@@ -247,8 +265,10 @@ else:
             logging.error(f"[{run_id}] Error details: {plan_run_state.error_message}", exc_info=True)
             return {"status": "failed", "error": plan_run_state.error_message}
         
+        status_value = getattr(plan_run_state.status, 'value', plan_run_state.status)
         final_output = {
-            "status": plan_run_state.status.value,
+            "status": status_value,
+            "reddit_posts": plan_run_state.get_variable("reddit_posts"),
             "selected_post_id": plan_run_state.get_variable("selected_post_id"),
             "selected_post_title": plan_run_state.get_variable("selected_post_title"),
             "drafted_reply": plan_run_state.get_variable("drafted_reply"),

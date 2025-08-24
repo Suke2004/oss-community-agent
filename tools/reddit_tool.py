@@ -1,9 +1,13 @@
 # tools/reddit_tool.py
 
 import os
-import praw
 import time
+import random
+import re
 from typing import List, Dict, Any, Optional
+
+import praw
+import prawcore
 
 class RedditTool:
     """
@@ -12,6 +16,9 @@ class RedditTool:
     This class encapsulates all Reddit-related functionality, including
     authentication, searching for posts, and posting replies. It is
     designed to be resilient to network issues and API rate limits.
+
+    Implements automatic exponential backoff with jitter for known rate-limit
+    scenarios (RedditAPIException with RATELIMIT and prawcore TooManyRequests).
     """
 
     def __init__(self, client_id: str, client_secret: str, username: str, password: str, user_agent: str):
@@ -36,7 +43,62 @@ class RedditTool:
             password=password,
             user_agent=user_agent
         )
+        # Backoff settings
+        self._max_retries = int(os.getenv("REDDIT_MAX_RETRIES", "5"))
+        self._base_sleep = float(os.getenv("REDDIT_BASE_SLEEP", "1.0"))  # seconds
         print("Reddit instance created and authenticated.")
+
+    def _parse_ratelimit_wait(self, message: str) -> float:
+        """Parse Reddit 'RATELIMIT' message to seconds to wait."""
+        if not message:
+            return 0
+        # Typical formats: 'you are doing that too much. try again in 6 minutes.'
+        # or '... in 12 seconds.'
+        match = re.search(r"(\d+)\s*(minute|second)s?", message, re.IGNORECASE)
+        if not match:
+            return 0
+        value = int(match.group(1))
+        unit = match.group(2).lower()
+        return value * 60.0 if unit.startswith("minute") else float(value)
+
+    def _with_backoff(self, func, *args, **kwargs):
+        """Execute a Reddit API call with exponential backoff and jitter."""
+        attempt = 0
+        while True:
+            try:
+                return func(*args, **kwargs)
+            except prawcore.exceptions.TooManyRequests as e:
+                retry_after = 0
+                try:
+                    retry_after = float(e.response.headers.get('Retry-After', 0))
+                except Exception:
+                    retry_after = 0
+                wait = max(retry_after, (self._base_sleep * (2 ** attempt)))
+                wait += random.uniform(0, 0.5)
+                if attempt >= self._max_retries:
+                    raise
+                time.sleep(wait)
+                attempt += 1
+            except praw.exceptions.RedditAPIException as e:
+                # Check for RATELIMIT errors; pick the maximum wait we can extract
+                waits = []
+                for item in getattr(e, 'items', []) or []:
+                    if getattr(item, 'error_type', '').upper() == 'RATELIMIT':
+                        waits.append(self._parse_ratelimit_wait(getattr(item, 'message', '')))
+                wait = max(waits) if waits else 0
+                if wait == 0 and attempt < self._max_retries:
+                    wait = self._base_sleep * (2 ** attempt)
+                if attempt >= self._max_retries:
+                    raise
+                time.sleep(wait + random.uniform(0, 0.5))
+                attempt += 1
+            except (prawcore.exceptions.RequestException, prawcore.exceptions.ResponseException) as e:
+                # Transient network/API errors
+                if attempt >= self._max_retries:
+                    raise
+                wait = self._base_sleep * (2 ** attempt) + random.uniform(0, 0.5)
+                time.sleep(wait)
+                attempt += 1
 
     def search_questions(self, subreddit_name: str, keywords: str, limit: int = 5) -> List[Dict[str, Any]]:
         """
@@ -53,26 +115,27 @@ class RedditTool:
         """
         try:
             subreddit = self.reddit.subreddit(subreddit_name)
-            
-            # Using .search() for a query-based search
-            search_results = subreddit.search(query=keywords, limit=limit)
-            
+
+            def _do_search():
+                return subreddit.search(query=keywords, limit=limit)
+
+            search_results = self._with_backoff(_do_search)
+
             posts = []
             for submission in search_results:
                 posts.append({
                     "id": submission.id,
                     "title": submission.title,
-                    "url": submission.url,
-                    "created_utc": submission.created_utc,
-                    "selftext": submission.selftext if hasattr(submission, 'selftext') else ''
+                    "url": getattr(submission, 'url', ''),
+                    "created_utc": getattr(submission, 'created_utc', 0),
+                    "selftext": getattr(submission, 'selftext', '')
                 })
-            
+
             print(f"Found {len(posts)} relevant posts in r/{subreddit_name}.")
             return posts
 
-        except praw.exceptions.PRAWException as e:
-            print(f"PRAW error during search: {e}", file=os.sys.stderr)
-            # TODO: Implement exponential backoff for rate limits.
+        except (praw.exceptions.RedditAPIException, praw.exceptions.PRAWException, prawcore.exceptions.PrawcoreException) as e:
+            print(f"Reddit API error during search: {e}", file=os.sys.stderr)
             return []
         except Exception as e:
             print(f"An unexpected error occurred during search: {e}", file=os.sys.stderr)
@@ -92,28 +155,33 @@ class RedditTool:
         try:
             # Get the submission object by its ID
             submission = self.reddit.submission(id=submission_id)
-            
+
             # Check if the bot has already replied to avoid spamming
-            # This is a good practice to avoid duplicate replies on the same post.
-            has_replied = any(c.author and c.author.name == self.reddit.user.me().name for c in submission.comments)
-            
+            def _list_comments():
+                # Force a comments fetch
+                submission.comments.replace_more(limit=0)
+                return list(submission.comments)
+
+            comments = self._with_backoff(_list_comments)
+            me = self._with_backoff(lambda: self.reddit.user.me())
+            has_replied = any(c.author and c.author.name == me.name for c in comments)
+
             if has_replied:
                 return {"status": "skipped", "message": "Already replied to this post."}
 
-            reply_object = submission.reply(reply_text)
-            
+            # Post the reply with backoff
+            reply_object = self._with_backoff(lambda: submission.reply(reply_text))
+
             print(f"Successfully replied to post ID: {submission_id}")
             return {
                 "status": "success",
                 "message": "Reply posted.",
-                "reply_id": reply_object.id,
+                "reply_id": getattr(reply_object, 'id', None),
                 "submission_id": submission_id
             }
 
-        except praw.exceptions.RedditAPIException as e:
-            # Handle API errors, such as rate limits or invalid submission IDs
+        except (praw.exceptions.RedditAPIException, praw.exceptions.PRAWException, prawcore.exceptions.PrawcoreException) as e:
             print(f"Reddit API error while posting: {e}", file=os.sys.stderr)
-            # TODO: Add logic to handle different API exceptions, like rate limits.
             return {"status": "error", "message": str(e)}
         except Exception as e:
             print(f"An unexpected error occurred while posting: {e}", file=os.sys.stderr)

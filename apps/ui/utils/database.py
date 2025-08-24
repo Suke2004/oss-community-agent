@@ -256,3 +256,14 @@ class DatabaseManager:
                 INSERT INTO user_actions (action_type, request_id, user_id, action_data)
                 VALUES (?, ?, ?, ?)
             ''', (action_type, request_id, user_id, json.dumps(action_data or {})))
+    
+    def request_exists_by_post_id(self, post_id: str) -> bool:
+        """Check if a request already exists for a given Reddit post_id"""
+        if not post_id:
+            return False
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.execute('''
+                SELECT 1 FROM requests WHERE post_id = ? LIMIT 1
+            ''', (post_id,))
+            return cursor.fetchone() is not None
