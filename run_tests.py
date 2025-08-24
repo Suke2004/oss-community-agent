@@ -173,11 +173,10 @@ def generate_test_report(unit_success, unit_failures, unit_errors,
     print("📊 TEST REPORT")
     print("=" * 60)
     
-    total_tests = 6  # Unit, Integration, UI, Environment, Performance
-    passed_tests = sum([
-        unit_success, integration_success, ui_success, 
-        env_success, perf_success
-    ])
+    # Compute total tests dynamically based on executed suites
+    results = [unit_success, integration_success, ui_success, env_success, perf_success]
+    total_tests = len(results)  # Unit, Integration, UI, Environment, Performance
+    passed_tests = sum(results)
     
     print(f"Overall Status: {'✅ PASSED' if passed_tests == total_tests else '❌ FAILED'}")
     print(f"Tests Passed: {passed_tests}/{total_tests}")
