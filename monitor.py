@@ -15,6 +15,9 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, Any, List
 
+# Ensure logs directory exists
+Path('data/logs').mkdir(parents=True, exist_ok=True)
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,

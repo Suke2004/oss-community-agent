@@ -118,7 +118,6 @@ class ProjectStatusChecker:
         """Check data storage and databases"""
         storage = {
             "main_db": "data/agent_data.db",
-            "ui_db": "apps/ui/data/agent_data.db",
             "rag_db": "rag_db/chroma.sqlite3",
             "logs_dir": "data/logs"
         }
