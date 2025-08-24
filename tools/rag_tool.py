@@ -53,12 +53,6 @@ from langchain.text_splitter import MarkdownHeaderTextSplitter, RecursiveCharact
 from langchain_core.documents import Document
 
 try:
-    from langchain_openai import OpenAIEmbeddings, ChatOpenAI
-except ImportError:
-    OpenAIEmbeddings = None
-    ChatOpenAI = None
-
-try:
     from langchain_community.embeddings import OllamaEmbeddings
 except ImportError:
     OllamaEmbeddings = None
@@ -88,7 +82,8 @@ CHROMA_HOST = _env("CHROMA_HOST")
 CHROMA_API_KEY = _env("CHROMA_API_KEY")
 
 #--EMBEDDINGS--
-EMBED_PROVIDER = _env("EMBED_PROVIDER", "none").lower()
+# Default to Ollama embeddings for local-first setup
+EMBED_PROVIDER = _env("EMBED_PROVIDER", "ollama").lower()
 EMBED_MODEL = _env("EMBED_MODEL", "nomic-embed-text")
 OPENAI_EMBED_MODEL = _env("OPENAI_EMBED_MODEL", "text-embedding-3-small")
 
@@ -146,9 +141,6 @@ def _load_docs() -> List[Document]:
 
 # --- Embeddings ---
 def _embedder():
-    if EMBED_PROVIDER=="openai":
-        if not OpenAIEmbeddings: raise ImportError("Install langchain-openai")
-        return OpenAIEmbeddings(model=OPENAI_EMBED_MODEL)
     if EMBED_PROVIDER=="ollama":
         if not OllamaEmbeddings: raise ImportError("Install langchain-community")
         return OllamaEmbeddings(model=EMBED_MODEL)
@@ -156,12 +148,6 @@ def _embedder():
 
 # --- LLM ---
 def _llm():
-    if LLM_PROVIDER=="openai":
-        if not ChatOpenAI: raise ImportError("Install langchain-openai")
-        return ChatOpenAI(model=OPENAI_MODEL, temperature=0.2)
-    if LLM_PROVIDER=="ollama":
-        if not Ollama: raise ImportError("Install langchain-community")
-        return Ollama(model=OLLAMA_LLM_MODEL)
     if LLM_PROVIDER=="groq":
         if not ChatGroq: raise ImportError("Install langchain-groq")
         return ChatGroq(model=GROQ_MODEL)

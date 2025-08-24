@@ -10,7 +10,9 @@ import sys
 import os
 
 # Add parent directories to path for imports
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if parent_dir not in sys.path:
+    sys.path.insert(0, parent_dir)
 
 from utils.database import DatabaseManager
 from utils.helpers import (
@@ -263,17 +265,17 @@ def render_dashboard():
     with col1:
         if st.button("🔍 View Pending Requests", use_container_width=True):
             st.session_state.current_page = 'approval'
-            st.experimental_rerun()
+            st.rerun()
     
     with col2:
         if st.button("📊 Generate Report", use_container_width=True):
             st.session_state.current_page = 'reports'
-            st.experimental_rerun()
+            st.rerun()
     
     with col3:
         if st.button("⚙️ Agent Settings", use_container_width=True):
             st.session_state.current_page = 'settings'
-            st.experimental_rerun()
+            st.rerun()
     
     with col4:
         if st.button("🚀 Start New Scan", use_container_width=True):
@@ -289,13 +291,13 @@ def render_dashboard():
     
     with col3:
         if st.button("🔄 Refresh Now"):
-            st.experimental_rerun()
+            st.rerun()
     
     # Auto-refresh logic
     if auto_refresh:
         import time
         time.sleep(30)  # Refresh every 30 seconds
-        st.experimental_rerun()
+        st.rerun()
 
 if __name__ == "__main__":
     render_dashboard()

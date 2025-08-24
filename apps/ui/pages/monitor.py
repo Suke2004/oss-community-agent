@@ -9,7 +9,9 @@ import plotly.graph_objects as go
 import plotly.express as px
 
 # Add parent directories to path for imports
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if parent_dir not in sys.path:
+    sys.path.insert(0, parent_dir)
 
 from utils.database import DatabaseManager
 from utils.helpers import format_timestamp, get_chart_colors, create_status_badge
@@ -461,7 +463,7 @@ def render_refresh_controls():
     
     with col3:
         if st.button("🔄 Refresh Now", use_container_width=True):
-            st.experimental_rerun()
+            st.rerun()
     
     with col4:
         if st.button("⏸️ Pause Agent", use_container_width=True):
@@ -470,7 +472,7 @@ def render_refresh_controls():
     # Auto-refresh logic
     if auto_refresh:
         time.sleep(refresh_interval)
-        st.experimental_rerun()
+        st.rerun()
     
     # Show last updated time
     st.markdown(f"""

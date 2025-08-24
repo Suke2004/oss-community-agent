@@ -7,7 +7,8 @@ from pathlib import Path
 
 # Add current directory to path for imports
 current_dir = Path(__file__).parent
-sys.path.append(str(current_dir))
+if str(current_dir) not in sys.path:
+    sys.path.insert(0, str(current_dir))
 
 # Import utilities and pages
 from utils.helpers import load_css, init_session_state
@@ -128,7 +129,7 @@ def render_sidebar():
             type="primary" if is_active else "secondary"
         ):
             st.session_state.current_page = page_key
-            st.experimental_rerun()
+            st.rerun()
     
     # Quick stats section
     st.markdown("---")
