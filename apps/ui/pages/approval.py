@@ -14,6 +14,7 @@ from utils.helpers import (
     format_timestamp, create_status_badge, format_confidence_score,
     parse_citations, format_processing_time, sanitize_input
 )
+from utils.agent_integration import agent_integration
 
 def render_approval_page():
     """Render the request approval workflow page"""
@@ -123,10 +124,12 @@ def render_approval_page():
     with col1:
         if st.button("✅ Approve All High Confidence", use_container_width=True):
             high_conf_requests = [r for r in filtered_requests if r.get('agent_confidence', 0) >= 0.8]
-            for request in high_conf_requests:
-                db.update_request_status(request['id'], 'approved', request['drafted_reply'])
-                db.log_user_action('bulk_approve', request['id'], 'admin', {'confidence_threshold': 0.8})
-            st.success(f"Approved {len(high_conf_requests)} high confidence requests!")
+            success_count = 0
+            for req in high_conf_requests:
+                res = agent_integration.approve_request(req['id'], req.get('drafted_reply', ''), post_to_reddit=True)
+                if res.get('status') in ["success", "dry_run"]:
+                    success_count += 1
+            st.success(f"Approved {success_count} high confidence requests!")
             st.experimental_rerun()
     
     with col2:
@@ -252,17 +255,22 @@ def render_request_review(request, db, index):
         with col1:
             if st.button("✅ Approve", key=f"approve_{request['id']}", use_container_width=True):
                 final_reply = sanitize_input(edited_reply)
-                db.update_request_status(request['id'], 'approved', final_reply)
-                db.log_user_action('approve', request['id'], 'admin', {'edited': edited_reply != request.get('drafted_reply', '')})
-                st.success("✅ Request approved!")
+                result = agent_integration.approve_request(request['id'], final_reply, post_to_reddit=True)
+                status = result.get('status')
+                if status in ["success", "dry_run"]:
+                    st.success(f"✅ Approved! {result.get('message', '')}")
+                else:
+                    st.warning(f"Approved locally, but posting failed: {result.get('message', 'Unknown error')}")
                 st.experimental_rerun()
         
         with col2:
             if st.button("❌ Reject", key=f"reject_{request['id']}", use_container_width=True):
                 feedback = st.text_input(f"Rejection reason (optional):", key=f"feedback_{request['id']}")
-                db.update_request_status(request['id'], 'rejected', human_feedback=feedback)
-                db.log_user_action('reject', request['id'], 'admin', {'reason': feedback})
-                st.error("❌ Request rejected")
+                result = agent_integration.reject_request(request['id'], feedback)
+                if result.get('status') == 'success':
+                    st.error("❌ Request rejected")
+                else:
+                    st.error(f"❌ Failed to reject: {result.get('message', 'Unknown error')}")
                 st.experimental_rerun()
         
         with col3:
