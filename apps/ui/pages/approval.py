@@ -1,10 +1,9 @@
-# apps/ui/pages/approval.py
-
 import streamlit as st
 import json
 from datetime import datetime
 import sys
 import os
+from utils.reddit_client import get_subreddit_data  # 🔑 Reddit data fetch
 
 # Add parent directories to path for imports
 parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -25,8 +24,8 @@ def render_approval_page():
     # Initialize database
     db = DatabaseManager()
 
-    # Load agent settings (subreddits, thresholds, etc.)
-    agent_settings = db.get_agent_settings()
+    # 🔑 Load latest agent settings directly from DB
+    agent_settings = db.get_agent_settings() or {}
     monitored_subs = agent_settings.get("monitored_subreddits", [])
 
     # Page header
@@ -114,6 +113,17 @@ def render_approval_page():
             format_func=lambda x: "All Subreddits" if x == "all" else f"r/{x}"
         )
 
+        # 🔥 Show live subreddit data when specific subreddit selected
+        if subreddit_filter != "all":
+            st.markdown(f"### 🔥 Trending in r/{subreddit_filter}")
+            reddit_data = get_subreddit_data(subreddit_filter, limit=5)
+            if isinstance(reddit_data, dict) and reddit_data.get("error"):
+                st.error(f"Error fetching subreddit: {reddit_data['error']}")
+            else:
+                for post in reddit_data:
+                    st.markdown(f"- [{post['title']}]({post['url']}) "
+                                f"(👍 {post['score']} | u/{post['author']})")
+
     with col3:
         confidence_filter = st.selectbox(
             "Confidence Level",
@@ -156,14 +166,12 @@ def render_approval_page():
     with col4:
         export_pending = st.button("📤 Export Pending", use_container_width=True)
         if export_pending:
-            # Export functionality would go here
             st.success("Pending requests exported to CSV!")
 
     # Individual request reviews
     st.markdown("<h2 style='margin: 2rem 0 1rem 0; color: var(--text-primary);'>📝 Review Queue</h2>", unsafe_allow_html=True)
 
     if filtered_requests:
-        # Show results count
         st.markdown(f"<p style='color: var(--text-secondary); margin-bottom: 1rem;'>Showing {len(filtered_requests)} of {len(pending_requests)} requests</p>", unsafe_allow_html=True)
 
         for i, request in enumerate(filtered_requests):
@@ -176,11 +184,9 @@ def apply_filters(requests, subreddit_filter, confidence_filter, sort_option):
     """Apply filters and sorting to requests"""
     filtered = requests.copy()
 
-    # Filter by subreddit
     if subreddit_filter != "all":
         filtered = [r for r in filtered if r['subreddit'] == subreddit_filter]
 
-    # Filter by confidence
     if confidence_filter == "high":
         filtered = [r for r in filtered if r.get('agent_confidence', 0) >= 0.8]
     elif confidence_filter == "medium":
@@ -188,7 +194,6 @@ def apply_filters(requests, subreddit_filter, confidence_filter, sort_option):
     elif confidence_filter == "low":
         filtered = [r for r in filtered if r.get('agent_confidence', 0) < 0.6]
 
-    # Sort
     if sort_option == "newest":
         filtered.sort(key=lambda x: x['created_at'], reverse=True)
     elif sort_option == "oldest":
@@ -204,23 +209,19 @@ def apply_filters(requests, subreddit_filter, confidence_filter, sort_option):
 def render_request_review(request, db, index):
     """Render individual request review card"""
 
-    # Create expandable review card
     with st.expander(
         f"📝 {request['post_title'][:80]}{'...' if len(request['post_title']) > 80 else ''} "
         f"• r/{request['subreddit']} • {format_confidence_score(request.get('agent_confidence'))}",
-        expanded=(index == 0)  # Expand first item by default
+        expanded=(index == 0)
     ):
-        # Request metadata
+        # Metadata
         col1, col2, col3 = st.columns(3)
-
         with col1:
             st.markdown(f"**📅 Created:** {format_timestamp(request['created_at'])}")
             st.markdown(f"**👤 Author:** u/{request.get('post_author', 'Unknown')}")
-
         with col2:
             st.markdown(f"**🏷️ Subreddit:** r/{request['subreddit']}")
             st.markdown(f"**🎯 Confidence:** {format_confidence_score(request.get('agent_confidence'))}")
-
         with col3:
             processing_time = format_processing_time(request.get('processing_time'))
             st.markdown(f"**⏱️ Processing:** {processing_time}")
@@ -228,7 +229,7 @@ def render_request_review(request, db, index):
             mod_color = "🟢" if moderation_score < 0.3 else "🟡" if moderation_score < 0.7 else "🔴"
             st.markdown(f"**🛡️ Safety:** {mod_color} {moderation_score*100:.0f}%")
 
-        # Original post content
+        # Original post
         st.markdown("### 📝 Original Question")
         st.markdown(f"""
         <div style="padding: 1rem; background: var(--bg-secondary); border-radius: 8px; border-left: 3px solid var(--primary-color); margin: 1rem 0;">
@@ -238,21 +239,18 @@ def render_request_review(request, db, index):
         </div>
         """, unsafe_allow_html=True)
 
-        # Show Reddit URL if available
         if request.get('post_url'):
             st.markdown(f"[🔗 View on Reddit]({request['post_url']})")
 
         # AI-generated response
         st.markdown("### 🤖 AI-Generated Response")
 
-        # Show citations if available
         citations = parse_citations(request.get('citations', '{}'))
         if citations:
             st.markdown("**📚 Sources Used:**")
             for citation in citations:
                 st.markdown(f"- {citation.get('title', 'Unknown source')}")
 
-        # Editable response text
         edited_reply = st.text_area(
             "Response (edit if needed):",
             value=request.get('drafted_reply', ''),
@@ -260,13 +258,21 @@ def render_request_review(request, db, index):
             key=f"reply_{request['id']}"
         )
 
-        # Moderation warnings
         if request.get('moderation_score', 0) > 0.5:
             st.warning("⚠️ This response may need additional review due to moderation flags.")
 
-        # Action buttons
-        col1, col2, col3, col4 = st.columns(4)
+        # 🔑 Extra context from subreddit
+        st.markdown(f"### 🔗 Context from r/{request['subreddit']}")
+        reddit_data = get_subreddit_data(request['subreddit'], limit=3)
+        if isinstance(reddit_data, dict) and reddit_data.get("error"):
+            st.error(f"Error fetching subreddit: {reddit_data['error']}")
+        else:
+            for post in reddit_data:
+                st.markdown(f"- [{post['title']}]({post['url']}) "
+                            f"(👍 {post['score']} | u/{post['author']})")
 
+        # Actions
+        col1, col2, col3, col4 = st.columns(4)
         with col1:
             if st.button("✅ Approve", key=f"approve_{request['id']}", use_container_width=True):
                 final_reply = sanitize_input(edited_reply)
@@ -277,7 +283,6 @@ def render_request_review(request, db, index):
                 else:
                     st.warning(f"Approved locally, but posting failed: {result.get('message', 'Unknown error')}")
                 st.rerun()
-
         with col2:
             if st.button("❌ Reject", key=f"reject_{request['id']}", use_container_width=True):
                 feedback = st.text_input(f"Rejection reason (optional):", key=f"feedback_{request['id']}")
@@ -287,16 +292,12 @@ def render_request_review(request, db, index):
                 else:
                     st.error(f"❌ Failed to reject: {result.get('message', 'Unknown error')}")
                 st.rerun()
-
         with col3:
             if st.button("⏳ Defer", key=f"defer_{request['id']}", use_container_width=True):
-                # Keep as pending but mark for later review
                 db.log_user_action('defer', request['id'], 'admin')
                 st.info("⏳ Request deferred for later review")
-
         with col4:
             if st.button("🔍 Details", key=f"details_{request['id']}", use_container_width=True):
-                # Show detailed information in a modal-like expander
                 with st.expander("🔍 Detailed Information", expanded=True):
                     st.json({
                         'request_id': request['id'],
