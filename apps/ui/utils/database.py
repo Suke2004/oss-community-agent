@@ -313,6 +313,18 @@ class DatabaseManager:
                 SELECT 1 FROM requests WHERE post_id = ? LIMIT 1
             ''', (post_id,))
             return cursor.fetchone() is not None
+    
+    def get_request_by_post_id(self, post_id: str) -> Optional[Dict[str, Any]]:
+        """Get a request by Reddit post_id"""
+        if not post_id:
+            return None
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.execute('''
+                SELECT * FROM requests WHERE post_id = ? LIMIT 1
+            ''', (post_id,))
+            row = cursor.fetchone()
+            return dict(row) if row else None
     def update_request_draft(self, request_id: int, draft: str):
         """
         Update the drafted reply for a specific request.
