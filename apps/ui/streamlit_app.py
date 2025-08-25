@@ -4,6 +4,7 @@ import streamlit as st
 import os
 import sys
 from pathlib import Path
+from utils.scheduler import ingest_unanswered_queries
 
 # Add current directory to path for imports
 current_dir = Path(__file__).parent
@@ -18,6 +19,14 @@ from pages.approval import render_approval_page
 from pages.logs import render_logs_page
 from pages.monitor import render_monitor_page
 from pages.settings import render_settings_page
+
+
+
+if st.button("📥 Fetch New Unanswered"):
+    for sub in monitored_subs or ["python"]:
+        ingest_unanswered_queries(sub, limit=3, model="groq")
+    st.success("Fetched unanswered queries and drafted replies!")
+    st.rerun()
 
 def main():
     """Main Streamlit application"""
@@ -283,7 +292,6 @@ if __name__ == "__main__":
             Script Path: {__file__}
             
             Environment Variables:
-            OPENAI_API_KEY: {'Set' if os.getenv('OPENAI_API_KEY') else 'Not Set'}
             REDDIT_CLIENT_ID: {'Set' if os.getenv('REDDIT_CLIENT_ID') else 'Not Set'}
             
             Error Details:
